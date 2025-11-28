@@ -481,16 +481,9 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			sourceName = "default"
 		}
 		
-		// Check if value is required but not found
+		// If no value found and no default, leave as zero value
+		// The validation phase will check if the field is required
 		if !found && !tagCfg.hasDefault {
-			if tagCfg.required {
-				fieldErrors = append(fieldErrors, FieldError{
-					FieldPath: fieldPath,
-					Code:      ErrCodeRequired,
-					Message:   "field is required but not provided",
-				})
-			}
-			// For non-required fields without values, leave as zero value
 			continue
 		}
 		

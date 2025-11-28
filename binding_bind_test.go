@@ -89,15 +89,20 @@ func TestBindStruct_RequiredField(t *testing.T) {
 	var provFields []FieldProvenance
 	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
 
-	if len(errors) != 1 {
-		t.Fatalf("errors = %d, want 1", len(errors))
+	// Binding phase should not check for required fields - that's validation's job
+	// So we expect 0 errors from binding
+	if len(errors) != 0 {
+		t.Fatalf("errors = %d, want 0 (required check is done in validation phase)", len(errors))
 	}
 
-	if errors[0].Code != ErrCodeRequired {
-		t.Errorf("error code = %q, want %q", errors[0].Code, ErrCodeRequired)
+	// Verify that Port was set correctly
+	if cfg.Port != 8080 {
+		t.Errorf("Port = %d, want 8080", cfg.Port)
 	}
-	if errors[0].FieldPath != "Host" {
-		t.Errorf("error field path = %q, want %q", errors[0].FieldPath, "Host")
+
+	// Verify that Host is zero value (empty string)
+	if cfg.Host != "" {
+		t.Errorf("Host = %q, want empty string", cfg.Host)
 	}
 }
 
@@ -351,28 +356,18 @@ func TestBindStruct_MultipleErrors(t *testing.T) {
 	var provFields []FieldProvenance
 	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
 
-	// Should have 3 errors: 2 required, 1 type conversion
-	if len(errors) != 3 {
-		t.Fatalf("errors = %d, want 3", len(errors))
+	// Binding phase only checks type conversion errors, not required fields
+	// Should have 1 error: 1 type conversion (required checks are in validation phase)
+	if len(errors) != 1 {
+		t.Fatalf("errors = %d, want 1 (only type conversion error)", len(errors))
 	}
 
-	// Check we have both required errors
-	requiredCount := 0
-	typeErrorCount := 0
-	for _, err := range errors {
-		if err.Code == ErrCodeRequired {
-			requiredCount++
-		}
-		if err.Code == ErrCodeInvalidType {
-			typeErrorCount++
-		}
+	// Check we have the type conversion error
+	if errors[0].Code != ErrCodeInvalidType {
+		t.Errorf("error code = %q, want %q", errors[0].Code, ErrCodeInvalidType)
 	}
-
-	if requiredCount != 2 {
-		t.Errorf("required errors = %d, want 2", requiredCount)
-	}
-	if typeErrorCount != 1 {
-		t.Errorf("type errors = %d, want 1", typeErrorCount)
+	if errors[0].FieldPath != "Max" {
+		t.Errorf("error field path = %q, want %q", errors[0].FieldPath, "Max")
 	}
 }
 
