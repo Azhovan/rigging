@@ -1,7 +1,11 @@
 package rigging
 
 import (
+	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // tagConfig holds parsed directives from a struct field's `conf` tag.
@@ -155,4 +159,230 @@ func startsWithDirective(s string) bool {
 		}
 	}
 	return false
+}
+
+// convertValue converts a raw value to the target type using reflection.
+// It supports:
+// - string, bool
+// - int, int8, int16, int32, int64
+// - uint, uint8, uint16, uint32, uint64
+// - float32, float64
+// - time.Duration
+// - []string (from comma-separated strings or arrays)
+// - nested structs (returned as-is for recursive binding)
+// - Optional[T] types
+//
+// Returns an error with type information if conversion fails.
+func convertValue(rawValue any, targetType reflect.Type) (any, error) {
+	// Handle nil values
+	if rawValue == nil {
+		return reflect.Zero(targetType).Interface(), nil
+	}
+
+	// Check if target is Optional[T]
+	if targetType.Kind() == reflect.Struct && 
+	   targetType.NumField() == 2 &&
+	   targetType.Field(0).Name == "Value" &&
+	   targetType.Field(1).Name == "Set" &&
+	   targetType.Field(1).Type.Kind() == reflect.Bool {
+		// This is an Optional[T] type
+		innerType := targetType.Field(0).Type
+		innerValue, err := convertValue(rawValue, innerType)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Create Optional[T] with Set=true
+		optionalVal := reflect.New(targetType).Elem()
+		optionalVal.Field(0).Set(reflect.ValueOf(innerValue))
+		optionalVal.Field(1).SetBool(true) // Set field
+		return optionalVal.Interface(), nil
+	}
+
+	// If rawValue is already the target type, return as-is
+	rawType := reflect.TypeOf(rawValue)
+	if rawType == targetType {
+		return rawValue, nil
+	}
+
+	// Handle nested structs - return as-is for recursive binding
+	if targetType.Kind() == reflect.Struct {
+		// If rawValue is a map, it will be handled by recursive binding
+		if rawType.Kind() == reflect.Map {
+			return rawValue, nil
+		}
+		// If rawValue is already a struct, return as-is
+		if rawType.Kind() == reflect.Struct {
+			return rawValue, nil
+		}
+	}
+
+	// Convert to string first for easier parsing
+	var strValue string
+	switch v := rawValue.(type) {
+	case string:
+		strValue = v
+	case []byte:
+		strValue = string(v)
+	default:
+		// For non-string types, use fmt.Sprint
+		strValue = fmt.Sprint(rawValue)
+	}
+
+	// Handle target type conversion
+	switch targetType.Kind() {
+	case reflect.String:
+		return strValue, nil
+
+	case reflect.Bool:
+		return parseBool(strValue)
+
+	case reflect.Int:
+		val, err := strconv.ParseInt(strValue, 10, 0)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to int: %w", strValue, err)
+		}
+		return int(val), nil
+
+	case reflect.Int8:
+		val, err := strconv.ParseInt(strValue, 10, 8)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to int8: %w", strValue, err)
+		}
+		return int8(val), nil
+
+	case reflect.Int16:
+		val, err := strconv.ParseInt(strValue, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to int16: %w", strValue, err)
+		}
+		return int16(val), nil
+
+	case reflect.Int32:
+		val, err := strconv.ParseInt(strValue, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to int32: %w", strValue, err)
+		}
+		return int32(val), nil
+
+	case reflect.Int64:
+		// Special case: time.Duration is an int64
+		if targetType == reflect.TypeOf(time.Duration(0)) {
+			duration, err := time.ParseDuration(strValue)
+			if err != nil {
+				return nil, fmt.Errorf("cannot convert %q to time.Duration: %w", strValue, err)
+			}
+			return duration, nil
+		}
+		
+		val, err := strconv.ParseInt(strValue, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to int64: %w", strValue, err)
+		}
+		return val, nil
+
+	case reflect.Uint:
+		val, err := strconv.ParseUint(strValue, 10, 0)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to uint: %w", strValue, err)
+		}
+		return uint(val), nil
+
+	case reflect.Uint8:
+		val, err := strconv.ParseUint(strValue, 10, 8)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to uint8: %w", strValue, err)
+		}
+		return uint8(val), nil
+
+	case reflect.Uint16:
+		val, err := strconv.ParseUint(strValue, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to uint16: %w", strValue, err)
+		}
+		return uint16(val), nil
+
+	case reflect.Uint32:
+		val, err := strconv.ParseUint(strValue, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to uint32: %w", strValue, err)
+		}
+		return uint32(val), nil
+
+	case reflect.Uint64:
+		val, err := strconv.ParseUint(strValue, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to uint64: %w", strValue, err)
+		}
+		return val, nil
+
+	case reflect.Float32:
+		val, err := strconv.ParseFloat(strValue, 32)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to float32: %w", strValue, err)
+		}
+		return float32(val), nil
+
+	case reflect.Float64:
+		val, err := strconv.ParseFloat(strValue, 64)
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert %q to float64: %w", strValue, err)
+		}
+		return val, nil
+
+	case reflect.Slice:
+		// Handle []string
+		if targetType.Elem().Kind() == reflect.String {
+			return parseStringSlice(rawValue)
+		}
+		return nil, fmt.Errorf("unsupported slice type: %s", targetType)
+
+	default:
+		return nil, fmt.Errorf("unsupported target type: %s", targetType)
+	}
+}
+
+// parseBool parses a boolean value from a string.
+// Accepts: "true", "false", "1", "0", "yes", "no" (case-insensitive)
+func parseBool(s string) (bool, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "true", "1", "yes":
+		return true, nil
+	case "false", "0", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("cannot convert %q to bool", s)
+	}
+}
+
+// parseStringSlice converts a value to []string.
+// Handles:
+// - []string: return as-is
+// - []any: convert each element to string
+// - string: split by comma
+func parseStringSlice(rawValue any) ([]string, error) {
+	switch v := rawValue.(type) {
+	case []string:
+		return v, nil
+	case []any:
+		result := make([]string, len(v))
+		for i, item := range v {
+			result[i] = fmt.Sprint(item)
+		}
+		return result, nil
+	case string:
+		// Split by comma and trim whitespace
+		if v == "" {
+			return []string{}, nil
+		}
+		parts := strings.Split(v, ",")
+		result := make([]string, len(parts))
+		for i, part := range parts {
+			result[i] = strings.TrimSpace(part)
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("cannot convert %T to []string", rawValue)
+	}
 }
