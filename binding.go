@@ -386,3 +386,188 @@ func parseStringSlice(rawValue any) ([]string, error) {
 		return nil, fmt.Errorf("cannot convert %T to []string", rawValue)
 	}
 }
+
+// mergedEntry represents a configuration value with its source information.
+type mergedEntry struct {
+	value      any
+	sourceName string
+}
+
+// bindStruct binds configuration data to a struct using reflection.
+// It walks struct fields recursively, parses tags, looks up values in the data map,
+// applies defaults, converts types, and records provenance.
+// All errors are collected and returned together rather than failing fast.
+func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentPrefix string, parentFieldPath string) []FieldError {
+	var fieldErrors []FieldError
+	
+	// Ensure target is a struct
+	if target.Kind() == reflect.Ptr {
+		target = target.Elem()
+	}
+	if target.Kind() != reflect.Struct {
+		return fieldErrors
+	}
+	
+	targetType := target.Type()
+	
+	// Walk through all fields
+	for i := 0; i < target.NumField(); i++ {
+		field := targetType.Field(i)
+		fieldValue := target.Field(i)
+		
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+		
+		// Parse struct tag
+		tag := field.Tag.Get("conf")
+		tagCfg := parseTag(tag)
+		
+		// Determine field path for provenance (e.g., "Database.Host")
+		fieldPath := field.Name
+		if parentFieldPath != "" {
+			fieldPath = parentFieldPath + "." + field.Name
+		}
+		
+		// Determine key path for lookup
+		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
+		
+		// Handle nested structs with prefix
+		if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
+			// Recursively bind nested struct with new prefix
+			nestedErrors := bindStruct(fieldValue, data, provenanceFields, tagCfg.prefix, fieldPath)
+			fieldErrors = append(fieldErrors, nestedErrors...)
+			continue
+		}
+		
+		// Handle nested structs (non-prefix case) - check this before looking up values
+		// because nested structs might not have a direct value in the data map
+		if fieldValue.Kind() == reflect.Struct && !isOptionalType(fieldValue.Type()) && fieldValue.Type() != reflect.TypeOf(time.Time{}) && fieldValue.Type() != reflect.TypeOf(time.Duration(0)) {
+			// Look up value in data map to see if there's a direct map value
+			entry, found := data[keyPath]
+			
+			// Check if rawValue is a map (from file sources)
+			if found && entry.value != nil {
+				if rawMap, ok := entry.value.(map[string]any); ok {
+					// Convert map entries to mergedEntry format
+					nestedData := make(map[string]mergedEntry)
+					for k, v := range rawMap {
+						nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
+					}
+					nestedErrors := bindStruct(fieldValue, nestedData, provenanceFields, "", fieldPath)
+					fieldErrors = append(fieldErrors, nestedErrors...)
+					continue
+				}
+			}
+			// Otherwise, try recursive binding with current data and prefix
+			// This handles the case where nested fields are flattened with dot notation
+			nestedErrors := bindStruct(fieldValue, data, provenanceFields, keyPath, fieldPath)
+			fieldErrors = append(fieldErrors, nestedErrors...)
+			continue
+		}
+		
+		// Look up value in data map
+		entry, found := data[keyPath]
+		var rawValue any
+		var sourceName string
+		
+		if found {
+			rawValue = entry.value
+			sourceName = entry.sourceName
+		} else if tagCfg.hasDefault {
+			// Apply default value
+			rawValue = tagCfg.defValue
+			sourceName = "default"
+		}
+		
+		// Check if value is required but not found
+		if !found && !tagCfg.hasDefault {
+			if tagCfg.required {
+				fieldErrors = append(fieldErrors, FieldError{
+					FieldPath: fieldPath,
+					Code:      ErrCodeRequired,
+					Message:   "field is required but not provided",
+				})
+			}
+			// For non-required fields without values, leave as zero value
+			continue
+		}
+		
+		// Convert value to target type
+		convertedValue, err := convertValue(rawValue, fieldValue.Type())
+		if err != nil {
+			fieldErrors = append(fieldErrors, FieldError{
+				FieldPath: fieldPath,
+				Code:      ErrCodeInvalidType,
+				Message:   fmt.Sprintf("type conversion failed: %v", err),
+			})
+			continue
+		}
+		
+		// Set field value
+		if fieldValue.CanSet() {
+			fieldValue.Set(reflect.ValueOf(convertedValue))
+			
+			// Record provenance
+			if provenanceFields != nil {
+				*provenanceFields = append(*provenanceFields, FieldProvenance{
+					FieldPath:  fieldPath,
+					KeyPath:    keyPath,
+					SourceName: sourceName,
+					Secret:     tagCfg.secret,
+				})
+			}
+		}
+	}
+	
+	return fieldErrors
+}
+
+// determineKeyPath determines the configuration key path for a field.
+// Priority: name tag > prefix + derived > derived
+func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) string {
+	// If name tag is specified, use it directly (ignores prefix)
+	if tagCfg.name != "" {
+		return tagCfg.name
+	}
+	
+	// Derive key from field name (lowercase first letter)
+	derived := deriveFieldKey(fieldName)
+	
+	// Apply parent prefix if present
+	if parentPrefix != "" {
+		return parentPrefix + "." + derived
+	}
+	
+	return derived
+}
+
+// deriveFieldKey derives a configuration key from a field name.
+// It lowercases the first letter of the field name.
+func deriveFieldKey(fieldName string) string {
+	if fieldName == "" {
+		return ""
+	}
+	
+	runes := []rune(fieldName)
+	runes[0] = rune(strings.ToLower(string(runes[0]))[0])
+	return string(runes)
+}
+
+// isOptionalType checks if a type is an Optional[T] type.
+func isOptionalType(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	if t.NumField() != 2 {
+		return false
+	}
+	if t.Field(0).Name != "Value" {
+		return false
+	}
+	if t.Field(1).Name != "Set" || t.Field(1).Type.Kind() != reflect.Bool {
+		return false
+	}
+	return true
+}
