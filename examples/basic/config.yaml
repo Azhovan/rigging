@@ -1,0 +1,30 @@
+# Example configuration file for the conf library demo
+# This file demonstrates YAML-based configuration
+
+environment: staging
+
+database:
+  host: db.staging.example.com
+  port: 5432
+  name: myapp_staging
+  user: app_user
+  maxconnections: 25
+  sslmode: require
+  connecttimeout: 10s
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  readtimeout: 30s
+  writetimeout: 30s
+  shutdowntimeout: 10s
+
+logging:
+  level: info
+  format: json
+  output: stdout
+
+features:
+  enablemetrics: true
+  enabletracing: false
+  ratelimit: 1000
