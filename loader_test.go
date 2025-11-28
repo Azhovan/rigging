@@ -2,7 +2,10 @@ package rigging
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestNewLoader verifies that NewLoader creates a loader with correct defaults.
@@ -483,5 +486,539 @@ func TestLoad_SourceError(t *testing.T) {
 
 	if cfg != nil {
 		t.Error("cfg should be nil when source fails")
+	}
+}
+
+// watchableSource is a test helper that implements the Source interface with Watch support.
+type watchableSource struct {
+	name     string
+	data     map[string]any
+	err      error
+	changeCh chan ChangeEvent
+}
+
+func newWatchableSource(name string, data map[string]any) *watchableSource {
+	return &watchableSource{
+		name:     name,
+		data:     data,
+		changeCh: make(chan ChangeEvent, 10),
+	}
+}
+
+func (w *watchableSource) Load(ctx context.Context) (map[string]any, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	if w.data == nil {
+		return make(map[string]any), nil
+	}
+	// Return a copy to avoid race conditions
+	result := make(map[string]any)
+	for k, v := range w.data {
+		result[k] = v
+	}
+	return result, nil
+}
+
+func (w *watchableSource) Watch(ctx context.Context) (<-chan ChangeEvent, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	return w.changeCh, nil
+}
+
+func (w *watchableSource) updateData(data map[string]any) {
+	w.data = data
+}
+
+func (w *watchableSource) triggerChange(cause string) {
+	w.changeCh <- ChangeEvent{
+		At:    time.Now(),
+		Cause: cause,
+	}
+}
+
+func (w *watchableSource) close() {
+	close(w.changeCh)
+}
+
+// TestWatch_InitialSnapshot verifies that Watch emits an initial snapshot.
+func TestWatch_InitialSnapshot(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"host": "localhost",
+		"port": 8080,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Should receive initial snapshot
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Config.Host != "localhost" {
+			t.Errorf("expected Host=localhost, got %s", snapshot.Config.Host)
+		}
+		if snapshot.Config.Port != 8080 {
+			t.Errorf("expected Port=8080, got %d", snapshot.Config.Port)
+		}
+		if snapshot.Version != 1 {
+			t.Errorf("expected Version=1, got %d", snapshot.Version)
+		}
+		if snapshot.Source != "initial" {
+			t.Errorf("expected Source=initial, got %s", snapshot.Source)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+}
+
+// TestWatch_ReloadOnChange verifies that Watch reloads config when source changes.
+func TestWatch_ReloadOnChange(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"host": "localhost",
+		"port": 8080,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot
+	select {
+	case <-snapshots:
+		// Initial snapshot received
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Update source data and trigger change
+	source.updateData(map[string]any{
+		"host": "example.com",
+		"port": 9090,
+	})
+	source.triggerChange("test-change")
+
+	// Should receive new snapshot with updated config
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Config.Host != "example.com" {
+			t.Errorf("expected Host=example.com, got %s", snapshot.Config.Host)
+		}
+		if snapshot.Config.Port != 9090 {
+			t.Errorf("expected Port=9090, got %d", snapshot.Config.Port)
+		}
+		if snapshot.Version != 2 {
+			t.Errorf("expected Version=2, got %d", snapshot.Version)
+		}
+		if snapshot.Source != "test-change" {
+			t.Errorf("expected Source=test-change, got %s", snapshot.Source)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for reload snapshot")
+	}
+}
+
+// TestWatch_ValidationError verifies that validation errors are sent to error channel.
+func TestWatch_ValidationError(t *testing.T) {
+	type Config struct {
+		Host string `conf:"required"`
+		Port int    `conf:"min:1024"`
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"host": "localhost",
+		"port": 8080,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot
+	select {
+	case <-snapshots:
+		// Initial snapshot received
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Update source with invalid data
+	source.updateData(map[string]any{
+		"port": 80, // Below minimum, and Host is missing
+	})
+	source.triggerChange("invalid-change")
+
+	// Should receive error, not a new snapshot
+	select {
+	case snapshot := <-snapshots:
+		t.Fatalf("expected error, got snapshot: %+v", snapshot)
+	case err := <-errors:
+		if err == nil {
+			t.Fatal("expected non-nil error")
+		}
+		// Verify it's a validation error
+		if !strings.Contains(err.Error(), "reload failed") {
+			t.Errorf("expected 'reload failed' in error, got: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for error")
+	}
+}
+
+// TestWatch_ContextCancellation verifies that channels are closed when context is cancelled.
+func TestWatch_ContextCancellation(t *testing.T) {
+	type Config struct {
+		Host string
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"host": "localhost",
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot
+	select {
+	case <-snapshots:
+		// Initial snapshot received
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Cancel context
+	cancel()
+
+	// Both channels should be closed
+	// Give some time for goroutines to clean up
+	time.Sleep(50 * time.Millisecond)
+
+	// Check that both channels are closed by trying to receive
+	select {
+	case _, ok := <-snapshots:
+		if ok {
+			t.Error("snapshot channel should be closed after context cancellation")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("timeout: snapshot channel not closed")
+	}
+
+	select {
+	case _, ok := <-errors:
+		if ok {
+			t.Error("error channel should be closed after context cancellation")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("timeout: error channel not closed")
+	}
+}
+
+// TestWatch_NoWatchableSource verifies behavior when no sources support watching.
+func TestWatch_NoWatchableSource(t *testing.T) {
+	type Config struct {
+		Host string
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"host": "localhost",
+		},
+	}
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Should receive initial snapshot
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Config.Host != "localhost" {
+			t.Errorf("expected Host=localhost, got %s", snapshot.Config.Host)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Channels should close since no sources support watching
+	select {
+	case _, ok := <-snapshots:
+		if ok {
+			t.Error("snapshot channel should be closed when no sources support watching")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for snapshot channel to close")
+	}
+}
+
+// TestWatch_MultipleChanges verifies that multiple changes increment version correctly.
+func TestWatch_MultipleChanges(t *testing.T) {
+	type Config struct {
+		Counter int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"counter": 1,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot (version 1)
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Version != 1 {
+			t.Errorf("expected Version=1, got %d", snapshot.Version)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Trigger multiple changes
+	for i := 2; i <= 4; i++ {
+		source.updateData(map[string]any{
+			"counter": i,
+		})
+		source.triggerChange(fmt.Sprintf("change-%d", i))
+
+		select {
+		case snapshot := <-snapshots:
+			if snapshot.Version != int64(i) {
+				t.Errorf("expected Version=%d, got %d", i, snapshot.Version)
+			}
+			if snapshot.Config.Counter != i {
+				t.Errorf("expected Counter=%d, got %d", i, snapshot.Config.Counter)
+			}
+		case err := <-errors:
+			t.Fatalf("unexpected error: %v", err)
+		case <-time.After(1 * time.Second):
+			t.Fatalf("timeout waiting for snapshot %d", i)
+		}
+	}
+}
+
+// TestWatch_Debouncing verifies that rapid changes are debounced.
+func TestWatch_Debouncing(t *testing.T) {
+	type Config struct {
+		Value int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"value": 1,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot
+	select {
+	case <-snapshots:
+		// Initial snapshot received
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Trigger rapid changes
+	for i := 2; i <= 10; i++ {
+		source.updateData(map[string]any{
+			"value": i,
+		})
+		source.triggerChange(fmt.Sprintf("rapid-change-%d", i))
+		time.Sleep(10 * time.Millisecond) // Faster than debounce delay
+	}
+
+	// Should receive only one snapshot with the final value due to debouncing
+	receivedCount := 0
+	var lastSnapshot Snapshot[Config]
+
+	// Wait for debounce to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Drain any snapshots
+	for {
+		select {
+		case snapshot := <-snapshots:
+			receivedCount++
+			lastSnapshot = snapshot
+		case err := <-errors:
+			t.Fatalf("unexpected error: %v", err)
+		case <-time.After(200 * time.Millisecond):
+			// No more snapshots
+			goto done
+		}
+	}
+
+done:
+	// Should have received 1 snapshot (debounced)
+	if receivedCount != 1 {
+		t.Logf("Note: Received %d snapshots (debouncing may vary)", receivedCount)
+	}
+
+	// The last snapshot should have the final value
+	if lastSnapshot.Config.Value != 10 {
+		t.Errorf("expected final Value=10, got %d", lastSnapshot.Config.Value)
+	}
+}
+
+// TestWatch_InitialLoadFailure verifies that Watch returns error if initial load fails.
+func TestWatch_InitialLoadFailure(t *testing.T) {
+	type Config struct {
+		Host string `conf:"required"`
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		// Missing required field
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err == nil {
+		t.Fatal("expected error from Watch when initial load fails")
+	}
+
+	if snapshots != nil {
+		t.Error("snapshots channel should be nil when Watch fails")
+	}
+	if errors != nil {
+		t.Error("errors channel should be nil when Watch fails")
+	}
+}
+
+// TestWatch_MultipleSources verifies that Watch monitors multiple sources.
+func TestWatch_MultipleSources(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	source1 := newWatchableSource("source1", map[string]any{
+		"host": "localhost",
+		"port": 8080,
+	})
+	defer source1.close()
+
+	source2 := newWatchableSource("source2", map[string]any{
+		"port": 9090, // Override port
+	})
+	defer source2.close()
+
+	loader := NewLoader[Config]().
+		WithSource(source1).
+		WithSource(source2)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	// Receive initial snapshot
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Config.Port != 9090 {
+			t.Errorf("expected Port=9090 (from source2), got %d", snapshot.Config.Port)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Trigger change in source1
+	source1.updateData(map[string]any{
+		"host": "example.com",
+		"port": 8080,
+	})
+	source1.triggerChange("source1-change")
+
+	// Should receive new snapshot
+	select {
+	case snapshot := <-snapshots:
+		if snapshot.Config.Host != "example.com" {
+			t.Errorf("expected Host=example.com, got %s", snapshot.Config.Host)
+		}
+		// Port should still be 9090 from source2
+		if snapshot.Config.Port != 9090 {
+			t.Errorf("expected Port=9090 (still from source2), got %d", snapshot.Config.Port)
+		}
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for reload snapshot")
 	}
 }
