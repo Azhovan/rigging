@@ -6,44 +6,37 @@ import (
 	"time"
 )
 
-// Source represents a pluggable configuration source.
-// Implementations provide configuration data from various sources
-// such as environment variables, files, or remote stores.
+// Source provides configuration data from backends (env vars, files, remote stores).
+// Keys must be normalized to lowercase dot-separated paths (e.g., "database.host").
 type Source interface {
-	// Load returns a flat map of configuration keys to values.
-	// Keys must be normalized to dot-separated paths (e.g., "database.host").
-	// The context can be used for cancellation and timeouts.
+	// Load returns configuration as a flat map. Missing optional sources should return empty map.
 	Load(ctx context.Context) (map[string]any, error)
 
-	// Watch returns a channel of change events if the source supports watching.
-	// Returns (nil, ErrWatchNotSupported) if watching is not supported.
-	// The channel is closed when the context is cancelled.
+	// Watch emits ChangeEvent when configuration changes. Returns ErrWatchNotSupported if not supported.
 	Watch(ctx context.Context) (<-chan ChangeEvent, error)
 }
 
-// ChangeEvent represents a configuration change notification.
+// ChangeEvent notifies of configuration changes.
 type ChangeEvent struct {
-	At    time.Time // When the change occurred
-	Cause string    // Description of what caused the change (e.g., "file-changed", "env-updated")
+	At    time.Time
+	Cause string // Description (e.g., "file-changed")
 }
 
-// ErrWatchNotSupported is returned by Source.Watch when the source
-// does not support watching for configuration changes.
+// ErrWatchNotSupported is returned when watching is not supported.
 var ErrWatchNotSupported = errors.New("rigging: watch not supported by this source")
 
-// Optional wraps a value that may or may not be explicitly set.
-// This allows distinguishing between "field not set" and "field set to zero value".
+// Optional distinguishes "not set" from "zero value".
 type Optional[T any] struct {
-	Value T    // The wrapped value
-	Set   bool // Whether the value was explicitly set
+	Value T
+	Set   bool
 }
 
-// Get returns the value and whether it was set.
+// Get returns the wrapped value and whether it was set.
 func (o Optional[T]) Get() (T, bool) {
 	return o.Value, o.Set
 }
 
-// OrDefault returns the value if set, otherwise returns the provided default.
+// OrDefault returns the wrapped value or the provided default.
 func (o Optional[T]) OrDefault(defaultVal T) T {
 	if o.Set {
 		return o.Value
@@ -51,29 +44,24 @@ func (o Optional[T]) OrDefault(defaultVal T) T {
 	return defaultVal
 }
 
-// Validator performs validation on a loaded configuration.
-// Custom validators can implement this interface to perform
-// cross-field or semantic validation beyond tag-based rules.
+// Validator performs custom validation after tag-based validation.
+// Use for cross-field, semantic, or external validation.
 type Validator[T any] interface {
-	// Validate checks the configuration and returns an error if validation fails.
-	// The error should typically be a *ValidationError for consistency.
+	// Validate checks configuration. Return *ValidationError for field-level errors.
 	Validate(ctx context.Context, cfg *T) error
 }
 
-// ValidatorFunc is a function adapter for Validator.
-// It allows using functions as validators without defining a new type.
+// ValidatorFunc is a function adapter for Validator interface.
 type ValidatorFunc[T any] func(ctx context.Context, cfg *T) error
 
-// Validate implements the Validator interface for ValidatorFunc.
 func (f ValidatorFunc[T]) Validate(ctx context.Context, cfg *T) error {
 	return f(ctx, cfg)
 }
 
-// Snapshot represents a loaded configuration with metadata.
-// It is used by the Watch functionality to provide versioned configuration updates.
+// Snapshot represents a configuration version emitted by Watch().
 type Snapshot[T any] struct {
-	Config   *T        // The loaded and validated configuration
-	Version  int64     // Version number, incremented on each reload
-	LoadedAt time.Time // When this configuration was loaded
-	Source   string    // Description of what triggered this load (e.g., "initial", "file-changed")
+	Config   *T
+	Version  int64     // Increments on reload (starts at 1)
+	LoadedAt time.Time
+	Source   string // What triggered the load
 }

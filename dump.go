@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// DumpOption configures dump behavior using the functional options pattern.
+// DumpOption configures dump behavior.
 type DumpOption func(*dumpConfig)
 
 // dumpConfig holds options for DumpEffective.
@@ -19,31 +19,29 @@ type dumpConfig struct {
 	indent      string // Indentation for JSON output (default: "  ")
 }
 
-// WithSources includes source attribution for each field in the output.
+// WithSources includes source attribution in output.
 func WithSources() DumpOption {
 	return func(cfg *dumpConfig) {
 		cfg.withSources = true
 	}
 }
 
-// AsJSON outputs configuration as JSON instead of text format.
+// AsJSON outputs configuration as JSON. Secrets are still redacted.
 func AsJSON() DumpOption {
 	return func(cfg *dumpConfig) {
 		cfg.asJSON = true
 	}
 }
 
-// WithIndent sets the indentation for JSON output.
-// Default is two spaces ("  ").
+// WithIndent sets JSON indentation (default: "  "). No effect for text output.
 func WithIndent(indent string) DumpOption {
 	return func(cfg *dumpConfig) {
 		cfg.indent = indent
 	}
 }
 
-// DumpEffective writes a human-readable representation of the configuration.
-// Secret fields are automatically redacted as "***redacted***".
-// Returns an error if writing to the writer fails.
+// DumpEffective writes configuration with automatic secret redaction.
+// Supports text or JSON format. Use WithSources(), AsJSON(), WithIndent() options.
 func DumpEffective[T any](w io.Writer, cfg *T, opts ...DumpOption) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")

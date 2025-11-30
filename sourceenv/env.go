@@ -9,35 +9,31 @@ import (
 	"github.com/Azhovan/rigging/internal/normalize"
 )
 
-// Options configures the environment variable source.
+// Options configures environment variable source behavior.
 type Options struct {
-	// Prefix applied to all environment variables (e.g., "APP_").
-	// Only variables starting with this prefix are considered.
+	// Prefix filters vars starting with prefix (stripped before normalization).
+	// Case-insensitive. Empty = load all vars.
 	Prefix string
 
-	// CaseSensitive controls whether variable names are case-sensitive.
-	// If false (default), variables are uppercased before lookup.
+	// CaseSensitive controls prefix matching (default: false).
+	// Keys are always normalized to lowercase after stripping.
 	CaseSensitive bool
 }
 
-// envSource implements the Source interface for environment variables.
 type envSource struct {
 	opts Options
 }
 
-// New creates a new environment variable source with the given options.
+// New creates an environment variable source.
 func New(opts Options) rigging.Source {
 	return &envSource{opts: opts}
 }
 
-// Load scans environment variables, filters by prefix, normalizes keys,
-// and returns a map of configuration values.
+// Load scans environment variables, filters by prefix, and normalizes keys.
 func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
 	result := make(map[string]any)
 
-	// Scan all environment variables
 	for _, env := range os.Environ() {
-		// Split into key=value
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
@@ -46,32 +42,27 @@ func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
 		key := parts[0]
 		value := parts[1]
 
-		// Filter by prefix (case-insensitive prefix matching)
+		// Filter and strip prefix
 		if e.opts.Prefix != "" {
 			if !strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(e.opts.Prefix)) {
 				continue
 			}
-			// Strip the prefix
 			key = key[len(e.opts.Prefix):]
 		}
 
-		// Skip empty keys after prefix stripping
 		if key == "" {
 			continue
 		}
 
-		// Normalize the key to dot-separated lowercase path
+		// Normalize: FOO__BAR → foo.bar
 		normalizedKey := normalize.ToLowerDotPath(key)
-
-		// Store the value as string
 		result[normalizedKey] = value
 	}
 
 	return result, nil
 }
 
-// Watch returns ErrWatchNotSupported as environment variable watching
-// is not supported in this implementation.
+// Watch returns ErrWatchNotSupported (env vars don't change at runtime).
 func (e *envSource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, error) {
 	return nil, rigging.ErrWatchNotSupported
 }

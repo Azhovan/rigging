@@ -9,18 +9,16 @@ import (
 	"time"
 )
 
-// Loader loads and validates configuration of type T from multiple sources.
-// It provides a fluent API for configuring sources, validators, and loading behavior.
-// Loader instances are not safe for concurrent use during configuration,
-// but loaded configuration instances are safe for concurrent reads.
+// Loader loads and validates configuration from multiple sources.
+// Sources are processed in order (later override earlier). Supports tag-based and custom validation.
+// Thread-safe for reads, not for concurrent configuration changes.
 type Loader[T any] struct {
-	sources    []Source       // Configuration sources, processed in order
-	validators []Validator[T] // Custom validators, executed in order
-	strict     bool           // Whether to fail on unknown keys (default: true)
+	sources    []Source
+	validators []Validator[T]
+	strict     bool // Fail on unknown keys (default: true)
 }
 
-// NewLoader creates a new Loader for configuration type T.
-// The loader starts with no sources or validators and strict mode enabled by default.
+// NewLoader creates a Loader with no sources/validators and strict mode enabled.
 func NewLoader[T any]() *Loader[T] {
 	return &Loader[T]{
 		sources:    make([]Source, 0),
@@ -29,37 +27,26 @@ func NewLoader[T any]() *Loader[T] {
 	}
 }
 
-// WithSource adds a configuration source to the loader.
-// Sources are processed in the order they are added, with later sources
-// overriding values from earlier sources.
-// Returns the loader for method chaining (fluent API).
+// WithSource adds a source. Sources are processed in order (later override earlier).
 func (l *Loader[T]) WithSource(src Source) *Loader[T] {
 	l.sources = append(l.sources, src)
 	return l
 }
 
-// WithValidator adds a custom validator for cross-field validation.
-// Validators are executed in the order they are added, after tag-based validation.
-// Returns the loader for method chaining (fluent API).
+// WithValidator adds a custom validator (executed after tag-based validation).
 func (l *Loader[T]) WithValidator(v Validator[T]) *Loader[T] {
 	l.validators = append(l.validators, v)
 	return l
 }
 
-// Strict controls whether unknown keys cause loading to fail.
-// When strict is true (default), any keys in sources that don't map to struct fields
-// will cause Load to return an error.
-// When strict is false, unknown keys are silently ignored.
-// Returns the loader for method chaining (fluent API).
+// Strict controls whether unknown keys cause errors. Default: true.
 func (l *Loader[T]) Strict(strict bool) *Loader[T] {
 	l.strict = strict
 	return l
 }
 
 // Load loads, merges, binds, and validates configuration from all sources.
-// It processes sources in order, merges their data, binds values to the typed struct,
-// performs tag-based validation, and runs custom validators.
-// Returns the typed configuration or a structured error.
+// Returns populated config or ValidationError with all field errors.
 func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 	// Step 1: Load from all sources and merge
 	mergedData := make(map[string]mergedEntry)
@@ -145,12 +132,9 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 	return cfg, nil
 }
 
-// Watch monitors all sources for changes and reloads configuration automatically.
-// Returns two channels:
-//   - snapshots: emits new Snapshot[T] on successful reload
-//   - errors: emits errors when reload/validation fails
-// The previous valid configuration is retained on validation failures.
-// Both channels are closed when ctx is cancelled.
+// Watch monitors sources for changes and auto-reloads configuration.
+// Returns: snapshots channel, errors channel, initial load error.
+// Changes are debounced (100ms). Built-in sources don't support watching yet.
 func (l *Loader[T]) Watch(ctx context.Context) (<-chan Snapshot[T], <-chan error, error) {
 	// Load initial configuration
 	initialCfg, err := l.Load(ctx)

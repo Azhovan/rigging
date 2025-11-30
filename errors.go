@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Standard error codes for validation failures
+// Error codes for validation failures.
 const (
 	ErrCodeRequired    = "required"
 	ErrCodeMin         = "min"
@@ -14,15 +14,12 @@ const (
 	ErrCodeInvalidType = "invalid_type"
 )
 
-// ValidationError represents one or more validation failures.
-// It contains all field-level errors encountered during configuration
-// loading and validation.
+// ValidationError aggregates field-level validation failures.
 type ValidationError struct {
 	FieldErrors []FieldError
 }
 
-// Error formats the validation error as a multi-line message listing
-// all field validation failures.
+// Error formats validation errors as a multi-line message.
 func (e *ValidationError) Error() string {
 	if len(e.FieldErrors) == 0 {
 		return "config validation failed: no errors"
@@ -44,12 +41,7 @@ func (e *ValidationError) Error() string {
 
 // FieldError represents a single field validation failure.
 type FieldError struct {
-	// FieldPath is the logical path to the field (e.g., "Database.Host")
-	FieldPath string
-
-	// Code is the error code (e.g., "required", "min", "max", "oneof", "invalid_type")
-	Code string
-
-	// Message is a human-readable description of the error
-	Message string
+	FieldPath string // Dot notation (e.g., "Database.Host")
+	Code      string // Error code (e.g., "required", "min")
+	Message   string // Human-readable description
 }
