@@ -470,7 +470,7 @@ func main() {
 }
 ```
 
-### 5. Use Provenance in Production
+### Production Logging
 
 ```go
 // ✓ Good: Log configuration sources at startup
