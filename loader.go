@@ -354,6 +354,9 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 				return
 			}
 
+			// Capture the cause to avoid closure issues with loop variable
+			cause := event.Cause
+
 			// Debounce: reset timer on each event
 			if debounceTimer != nil {
 				debounceTimer.Stop()
@@ -377,7 +380,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 					Config:   newCfg,
 					Version:  currentVersion,
 					LoadedAt: time.Now(),
-					Source:   event.Cause,
+					Source:   cause,
 				}
 
 				select {
