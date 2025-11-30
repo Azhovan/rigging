@@ -7,11 +7,12 @@ import (
 
 // Error codes for validation failures.
 const (
-	ErrCodeRequired    = "required"
-	ErrCodeMin         = "min"
-	ErrCodeMax         = "max"
-	ErrCodeOneOf       = "oneof"
-	ErrCodeInvalidType = "invalid_type"
+	ErrCodeRequired    = "required"     // Field is required but not provided
+	ErrCodeMin         = "min"          // Value is below minimum constraint
+	ErrCodeMax         = "max"          // Value exceeds maximum constraint
+	ErrCodeOneOf       = "oneof"        // Value is not in the allowed set
+	ErrCodeInvalidType = "invalid_type" // Type conversion failed
+	ErrCodeUnknownKey  = "unknown_key"  // Configuration key doesn't map to any field (strict mode)
 )
 
 // ValidationError aggregates field-level validation failures.

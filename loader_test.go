@@ -374,6 +374,24 @@ func TestLoad_StrictMode(t *testing.T) {
 		t.Error("cfg should be nil when strict mode fails")
 	}
 
+	// Verify it's a ValidationError with unknown_key code
+	valErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+
+	if len(valErr.FieldErrors) != 1 {
+		t.Fatalf("expected 1 field error, got %d", len(valErr.FieldErrors))
+	}
+
+	if valErr.FieldErrors[0].Code != ErrCodeUnknownKey {
+		t.Errorf("expected code %q, got %q", ErrCodeUnknownKey, valErr.FieldErrors[0].Code)
+	}
+
+	if valErr.FieldErrors[0].FieldPath != "unknown" {
+		t.Errorf("expected FieldPath %q, got %q", "unknown", valErr.FieldErrors[0].FieldPath)
+	}
+
 	// Test with strict mode disabled
 	loader = NewLoader[Config]().WithSource(source).Strict(false)
 	cfg, err = loader.Load(context.Background())

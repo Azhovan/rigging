@@ -80,15 +80,19 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 		validKeys := collectValidKeys(reflect.TypeOf(cfg), "")
 
 		// Check for unknown keys
-		var unknownKeys []string
+		var unknownKeyErrors []FieldError
 		for key := range mergedData {
 			if !validKeys[key] {
-				unknownKeys = append(unknownKeys, key)
+				unknownKeyErrors = append(unknownKeyErrors, FieldError{
+					FieldPath: key,
+					Code:      ErrCodeUnknownKey,
+					Message:   "unknown configuration key (strict mode)",
+				})
 			}
 		}
 
-		if len(unknownKeys) > 0 {
-			return nil, fmt.Errorf("strict mode: unknown configuration keys: %v", unknownKeys)
+		if len(unknownKeyErrors) > 0 {
+			return nil, &ValidationError{FieldErrors: unknownKeyErrors}
 		}
 	}
 
