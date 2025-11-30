@@ -286,32 +286,17 @@ All errors are collected and returned together.
 
 ## Comparison with Other Libraries
 
-| Feature | Rigging | Viper | envconfig | config |
-|---------|---------|-------|-----------|--------|
-| Type safety | Compile-time | Runtime | Compile-time | Compile-time |
-| Multi-source | Explicit order | Implicit | Env only | Single source |
-| Provenance | Full tracking | No | No | No |
-| Validation | Tags + custom | Manual | Tags only | Manual |
-| Secret redaction | Automatic | Manual | Manual | Manual |
-| Global state | None | Singleton | None | None |
-| Watch/reload | Built-in | Built-in | No | No |
+| Feature | Rigging | Viper | envconfig |
+|---------|---------|-------|-----------|
+| Type safety | Compile-time | Runtime | Compile-time |
+| Multi-source | Explicit order | Implicit | Env only |
+| Provenance | Full tracking | No | No |
+| Validation | Tags + custom | Manual | Tags only |
+| Secret redaction | Automatic | Manual | Manual |
+| Global state | None | Singleton | None |
+| Watch/reload | API ready* | Built-in | No |
 
-**Choose Rigging when**:
-- You need compile-time type safety
-- You want to know where config values came from
-- You have complex validation requirements
-- You need to enforce policies across environments
-- You want testable configuration (no globals)
-
-**Choose Viper when**:
-- You need dynamic configuration keys
-- You're okay with runtime type assertions
-- You don't need provenance tracking
-
-**Choose envconfig when**:
-- You only use environment variables
-- You don't need multi-source support
-- Simple tag validation is sufficient
+\* `loader.Watch()` is implemented. Built-in sources return `ErrWatchNotSupported`. Implement `Source.Watch()` in custom sources to enable hot-reload.
 
 ## Configuration Sources
 
@@ -360,7 +345,7 @@ func (s *ConsulSource) Load(ctx context.Context) (map[string]any, error) {
 
 ## Watch and Reload
 
-Monitor sources for changes and reload automatically:
+The Watch API allows monitoring sources for changes and reloading configuration automatically:
 
 ```go
 snapshots, errors, err := loader.Watch(ctx)
@@ -381,6 +366,21 @@ go func() {
         }
     }
 }()
+```
+
+**Note**: Built-in sources (sourcefile, sourceenv) return `ErrWatchNotSupported`. To use watch with custom sources:
+
+```go
+type MySource struct{}
+
+func (s *MySource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, error) {
+    ch := make(chan rigging.ChangeEvent)
+    go func() {
+        // Emit events when config changes
+        ch <- rigging.ChangeEvent{At: time.Now(), Cause: "updated"}
+    }()
+    return ch, nil
+}
 ```
 
 ## Strict Mode
@@ -431,19 +431,17 @@ type Config struct {
 
 ### Field Naming
 
-```go
-// Good: Matches normalized keys
-type Config struct {
-    Maxconnections int
-    Apikey         string
-}
+Use idiomatic Go names and override the key mapping when needed:
 
-// Avoid: CamelCase (won't match normalized keys)
+```go
 type Config struct {
-    MaxConnections int
-    ApiKey         string
+    MaxConnections int    `conf:"name:maxconnections"`
+    APIKey         string `conf:"name:apikey"`
+    RetryTimeout   time.Duration `conf:"name:retry.timeout"`
 }
 ```
+
+**Key normalization**: Field names are lowercased (first letter only) by default. Use `name:` tag to specify exact key paths for configuration sources.
 
 ### Handling Secrets
 
@@ -649,7 +647,6 @@ Configure binding and validation with the `conf` tag:
 | `secret` | Mark field for redaction | `conf:"secret"` |
 | `prefix:path` | Prefix for nested struct fields | `conf:"prefix:database"` |
 | `name:path` | Override derived key path | `conf:"name:custom.path"` |
-| `env:VAR` | Bind to specific environment variable | `conf:"env:API_KEY"` |
 
 **Combining tags:**
 
@@ -658,6 +655,21 @@ type Config struct {
     Port     int    `conf:"default:8080,min:1024,max:65535"`
     Env      string `conf:"required,oneof:prod,staging,dev"`
     Password string `conf:"required,secret"`
+}
+```
+
+**Tag precedence:**
+
+- `name:` overrides all key derivation (ignores `prefix:` and field name)
+- `prefix:` applies to nested struct fields
+- Without `name:`, keys are derived from field names (lowercased first letter)
+
+```go
+type Config struct {
+    Database struct {
+        Host string              // Key: database.host (prefix applied)
+        Port int `conf:"name:db.port"` // Key: db.port (name overrides prefix)
+    } `conf:"prefix:database"`
 }
 ```
 
@@ -710,11 +722,11 @@ A: Yes! Rigging supports YAML, JSON, and TOML files. Just define a struct that m
 **Q: How do I handle secrets?**  
 A: Mark fields with `secret` tag and load from environment variables. Secrets are automatically redacted in dumps.
 
-**Q: What about hot-reload?**  
-A: Use `loader.Watch()` to monitor sources for changes. Note: Built-in sources don't support watch yet (coming soon).
+**Q: Does Rigging support hot-reload?**  
+A: The `loader.Watch()` API is implemented and ready to use. However, built-in sources (sourcefile, sourceenv) don't emit change events yet. You can implement custom sources with watch support, or wait for file watching (planned via fsnotify).
 
 **Q: Is this production-ready?**  
-A: Yes! Rigging is designed for production use with comprehensive error handling, validation, and observability.
+A: Rigging is designed for production use with comprehensive error handling, validation, and observability. The API is currently v0.x - expect minor breaking changes as we incorporate feedback from early adopters.
 
 ## License
 
