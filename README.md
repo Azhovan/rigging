@@ -431,17 +431,22 @@ type Config struct {
 
 ### Field Naming
 
-Use idiomatic Go names and override the key mapping when needed:
+Use idiomatic Go names - keys are automatically normalized:
 
 ```go
 type Config struct {
-    MaxConnections int    `conf:"name:maxconnections"`
-    APIKey         string `conf:"name:apikey"`
-    RetryTimeout   time.Duration `conf:"name:retry.timeout"`
+    MaxConnections int           // Matches: maxconnections
+    APIKey         string         // Matches: apikey
+    RetryTimeout   time.Duration  // Matches: retrytimeout
 }
 ```
 
-**Key normalization**: Field names are lowercased (first letter only) by default. Use `name:` tag to specify exact key paths for configuration sources.
+**Key normalization**: All keys are fully lowercased for matching. Field name `MaxConnections` automatically matches config key `maxconnections`, `MAXCONNECTIONS`, or `max_connections` (after normalization). Use `name:` tag only when you need a different key path:
+
+```go
+type Config struct {
+    MaxConnections int `conf:"name:max.connections"` // Matches: max.connections
+}
 
 ### Handling Secrets
 

@@ -519,33 +519,32 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 
 // determineKeyPath determines the configuration key path for a field.
 // Priority: name tag > prefix + derived > derived
+// All keys are normalized to lowercase for consistent matching.
 func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) string {
 	// If name tag is specified, use it directly (ignores prefix)
 	if tagCfg.name != "" {
-		return tagCfg.name
+		return strings.ToLower(tagCfg.name)
 	}
 
-	// Derive key from field name (lowercase first letter)
+	// Derive key from field name (fully lowercase)
 	derived := deriveFieldKey(fieldName)
 
-	// Apply parent prefix if present
+	// Apply parent prefix if present (normalize prefix too)
 	if parentPrefix != "" {
-		return parentPrefix + "." + derived
+		return strings.ToLower(parentPrefix) + "." + derived
 	}
 
 	return derived
 }
 
 // deriveFieldKey derives a configuration key from a field name.
-// It lowercases the first letter of the field name.
+// It fully lowercases the field name to match source key normalization.
 func deriveFieldKey(fieldName string) string {
 	if fieldName == "" {
 		return ""
 	}
 
-	runes := []rune(fieldName)
-	runes[0] = rune(strings.ToLower(string(runes[0]))[0])
-	return string(runes)
+	return strings.ToLower(fieldName)
 }
 
 // isOptionalType checks if a type is an Optional[T] type.
