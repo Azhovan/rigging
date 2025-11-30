@@ -167,7 +167,8 @@ func startsWithDirective(s string) bool {
 // - int, int8, int16, int32, int64
 // - uint, uint8, uint16, uint32, uint64
 // - float32, float64
-// - time.Duration
+// - time.Duration (parsed from strings like "5s", "10m", "1h")
+// - time.Time (parsed from RFC3339, RFC3339Nano, and common date formats)
 // - []string (from comma-separated strings or arrays)
 // - nested structs (returned as-is for recursive binding)
 // - Optional[T] types
@@ -203,6 +204,31 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 	rawType := reflect.TypeOf(rawValue)
 	if rawType == targetType {
 		return rawValue, nil
+	}
+
+	// Handle time.Time specially before generic struct handling
+	if targetType == reflect.TypeOf(time.Time{}) {
+		switch v := rawValue.(type) {
+		case string:
+			// Try multiple common time formats
+			formats := []string{
+				time.RFC3339,
+				time.RFC3339Nano,
+				"2006-01-02T15:04:05Z07:00",
+				"2006-01-02 15:04:05",
+				"2006-01-02",
+			}
+			for _, format := range formats {
+				if t, err := time.Parse(format, v); err == nil {
+					return t, nil
+				}
+			}
+			return nil, fmt.Errorf("cannot parse %q as time.Time (tried RFC3339, RFC3339Nano, and common formats)", v)
+		case time.Time:
+			return v, nil
+		default:
+			return nil, fmt.Errorf("cannot convert %T to time.Time", rawValue)
+		}
 	}
 
 	// Handle nested structs - return as-is for recursive binding
