@@ -197,23 +197,3 @@ func TestEnvSource_ComplexNesting(t *testing.T) {
 		}
 	}
 }
-
-// Helper function for case-insensitive prefix checking
-func hasPrefix(s, prefix string) bool {
-	if len(s) < len(prefix) {
-		return false
-	}
-	for i := 0; i < len(prefix); i++ {
-		if toLower(s[i]) != toLower(prefix[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func toLower(b byte) byte {
-	if b >= 'A' && b <= 'Z' {
-		return b + ('a' - 'A')
-	}
-	return b
-}

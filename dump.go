@@ -337,7 +337,9 @@ func formatValueForJSON(v reflect.Value, prov *FieldProvenance) any {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		// Special handling for time.Duration
 		if v.Type().String() == "time.Duration" {
-			return v.Interface().(time.Duration).String()
+			if dur, ok := v.Interface().(time.Duration); ok {
+				return dur.String()
+			}
 		}
 		return v.Int()
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -361,7 +363,9 @@ func formatValueForJSON(v reflect.Value, prov *FieldProvenance) any {
 		return slice
 	case reflect.Struct:
 		if v.Type().String() == "time.Time" {
-			return v.Interface().(time.Time).Format(time.RFC3339)
+			if t, ok := v.Interface().(time.Time); ok {
+				return t.Format(time.RFC3339)
+			}
 		}
 		return v.Interface()
 	default:
@@ -383,7 +387,9 @@ func formatValueAsString(v reflect.Value) string {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		// Special handling for time.Duration
 		if v.Type().String() == "time.Duration" {
-			return v.Interface().(time.Duration).String()
+			if dur, ok := v.Interface().(time.Duration); ok {
+				return dur.String()
+			}
 		}
 		return fmt.Sprintf("%d", v.Int())
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -402,7 +408,9 @@ func formatValueAsString(v reflect.Value) string {
 		return fmt.Sprintf("%v", v.Interface())
 	case reflect.Struct:
 		if v.Type().String() == "time.Time" {
-			return v.Interface().(time.Time).Format(time.RFC3339)
+			if t, ok := v.Interface().(time.Time); ok {
+				return t.Format(time.RFC3339)
+			}
 		}
 		return fmt.Sprintf("%v", v.Interface())
 	default:

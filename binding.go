@@ -10,16 +10,16 @@ import (
 
 // tagConfig holds parsed directives from a struct field's `conf` tag.
 type tagConfig struct {
-	env      string   // Environment variable name (env:VAR_NAME)
-	name     string   // Custom key path (name:custom.path)
-	prefix   string   // Prefix for nested structs (prefix:foo)
-	defValue string   // Default value (default:value)
-	min      string   // Minimum constraint (min:N)
-	max      string   // Maximum constraint (max:M)
-	oneof    []string // Allowed values (oneof:a,b,c)
-	required bool     // Field is required (required or required:true)
-	secret   bool     // Field is secret (secret or secret:true)
-	hasDefault bool   // Whether a default directive was present
+	env        string   // Environment variable name (env:VAR_NAME)
+	name       string   // Custom key path (name:custom.path)
+	prefix     string   // Prefix for nested structs (prefix:foo)
+	defValue   string   // Default value (default:value)
+	min        string   // Minimum constraint (min:N)
+	max        string   // Maximum constraint (max:M)
+	oneof      []string // Allowed values (oneof:a,b,c)
+	required   bool     // Field is required (required or required:true)
+	secret     bool     // Field is secret (secret or secret:true)
+	hasDefault bool     // Whether a default directive was present
 }
 
 // parseTag parses a `conf` struct tag into a structured tagConfig.
@@ -27,20 +27,20 @@ type tagConfig struct {
 // Boolean directives can omit `:true` (e.g., "required" == "required:true")
 func parseTag(tag string) tagConfig {
 	cfg := tagConfig{}
-	
+
 	if tag == "" {
 		return cfg
 	}
-	
+
 	// Parse directives manually to handle oneof values that contain commas
 	directives := splitDirectives(tag)
-	
+
 	for _, directive := range directives {
 		directive = strings.TrimSpace(directive)
 		if directive == "" {
 			continue
 		}
-		
+
 		// Split by colon to separate directive name from value
 		parts := strings.SplitN(directive, ":", 2)
 		name := strings.TrimSpace(parts[0])
@@ -48,7 +48,7 @@ func parseTag(tag string) tagConfig {
 		if len(parts) > 1 {
 			value = parts[1] // Don't trim value - empty strings may be intentional
 		}
-		
+
 		switch name {
 		case "env":
 			cfg.env = value
@@ -94,7 +94,7 @@ func parseTag(tag string) tagConfig {
 			}
 		}
 	}
-	
+
 	return cfg
 }
 
@@ -104,10 +104,10 @@ func splitDirectives(tag string) []string {
 	var directives []string
 	var current strings.Builder
 	inOneof := false
-	
+
 	for i := 0; i < len(tag); i++ {
 		ch := tag[i]
-		
+
 		// Check if we're entering an oneof directive
 		if !inOneof && i+6 <= len(tag) && tag[i:i+6] == "oneof:" {
 			inOneof = true
@@ -115,7 +115,7 @@ func splitDirectives(tag string) []string {
 			i += 5 // Skip past "oneof:"
 			continue
 		}
-		
+
 		if ch == ',' {
 			if inOneof {
 				// Check if the next directive starts after this comma
@@ -140,12 +140,12 @@ func splitDirectives(tag string) []string {
 			current.WriteByte(ch)
 		}
 	}
-	
+
 	// Add the last directive
 	if current.Len() > 0 {
 		directives = append(directives, current.String())
 	}
-	
+
 	return directives
 }
 
@@ -180,18 +180,18 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 	}
 
 	// Check if target is Optional[T]
-	if targetType.Kind() == reflect.Struct && 
-	   targetType.NumField() == 2 &&
-	   targetType.Field(0).Name == "Value" &&
-	   targetType.Field(1).Name == "Set" &&
-	   targetType.Field(1).Type.Kind() == reflect.Bool {
+	if targetType.Kind() == reflect.Struct &&
+		targetType.NumField() == 2 &&
+		targetType.Field(0).Name == "Value" &&
+		targetType.Field(1).Name == "Set" &&
+		targetType.Field(1).Type.Kind() == reflect.Bool {
 		// This is an Optional[T] type
 		innerType := targetType.Field(0).Type
 		innerValue, err := convertValue(rawValue, innerType)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Create Optional[T] with Set=true
 		optionalVal := reflect.New(targetType).Elem()
 		optionalVal.Field(0).Set(reflect.ValueOf(innerValue))
@@ -274,7 +274,7 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 			}
 			return duration, nil
 		}
-		
+
 		val, err := strconv.ParseInt(strValue, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("cannot convert %q to int64: %w", strValue, err)
@@ -399,7 +399,7 @@ type mergedEntry struct {
 // All errors are collected and returned together rather than failing fast.
 func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentPrefix string, parentFieldPath string) []FieldError {
 	var fieldErrors []FieldError
-	
+
 	// Ensure target is a struct
 	if target.Kind() == reflect.Ptr {
 		target = target.Elem()
@@ -407,32 +407,32 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 	if target.Kind() != reflect.Struct {
 		return fieldErrors
 	}
-	
+
 	targetType := target.Type()
-	
+
 	// Walk through all fields
 	for i := 0; i < target.NumField(); i++ {
 		field := targetType.Field(i)
 		fieldValue := target.Field(i)
-		
+
 		// Skip unexported fields
 		if !field.IsExported() {
 			continue
 		}
-		
+
 		// Parse struct tag
 		tag := field.Tag.Get("conf")
 		tagCfg := parseTag(tag)
-		
+
 		// Determine field path for provenance (e.g., "Database.Host")
 		fieldPath := field.Name
 		if parentFieldPath != "" {
 			fieldPath = parentFieldPath + "." + field.Name
 		}
-		
+
 		// Determine key path for lookup
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
-		
+
 		// Handle nested structs with prefix
 		if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
 			// Recursively bind nested struct with new prefix
@@ -440,13 +440,13 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
-		
+
 		// Handle nested structs (non-prefix case) - check this before looking up values
 		// because nested structs might not have a direct value in the data map
 		if fieldValue.Kind() == reflect.Struct && !isOptionalType(fieldValue.Type()) && fieldValue.Type() != reflect.TypeOf(time.Time{}) && fieldValue.Type() != reflect.TypeOf(time.Duration(0)) {
 			// Look up value in data map to see if there's a direct map value
 			entry, found := data[keyPath]
-			
+
 			// Check if rawValue is a map (from file sources)
 			if found && entry.value != nil {
 				if rawMap, ok := entry.value.(map[string]any); ok {
@@ -466,12 +466,12 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
-		
+
 		// Look up value in data map
 		entry, found := data[keyPath]
 		var rawValue any
 		var sourceName string
-		
+
 		if found {
 			rawValue = entry.value
 			sourceName = entry.sourceName
@@ -480,13 +480,13 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			rawValue = tagCfg.defValue
 			sourceName = "default"
 		}
-		
+
 		// If no value found and no default, leave as zero value
 		// The validation phase will check if the field is required
 		if !found && !tagCfg.hasDefault {
 			continue
 		}
-		
+
 		// Convert value to target type
 		convertedValue, err := convertValue(rawValue, fieldValue.Type())
 		if err != nil {
@@ -497,11 +497,11 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			})
 			continue
 		}
-		
+
 		// Set field value
 		if fieldValue.CanSet() {
 			fieldValue.Set(reflect.ValueOf(convertedValue))
-			
+
 			// Record provenance
 			if provenanceFields != nil {
 				*provenanceFields = append(*provenanceFields, FieldProvenance{
@@ -513,7 +513,7 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 			}
 		}
 	}
-	
+
 	return fieldErrors
 }
 
@@ -524,15 +524,15 @@ func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) s
 	if tagCfg.name != "" {
 		return tagCfg.name
 	}
-	
+
 	// Derive key from field name (lowercase first letter)
 	derived := deriveFieldKey(fieldName)
-	
+
 	// Apply parent prefix if present
 	if parentPrefix != "" {
 		return parentPrefix + "." + derived
 	}
-	
+
 	return derived
 }
 
@@ -542,7 +542,7 @@ func deriveFieldKey(fieldName string) string {
 	if fieldName == "" {
 		return ""
 	}
-	
+
 	runes := []rune(fieldName)
 	runes[0] = rune(strings.ToLower(string(runes[0]))[0])
 	return string(runes)

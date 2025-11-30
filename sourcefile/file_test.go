@@ -45,7 +45,7 @@ features:
 	assert.Equal(t, "secret", data["database.credentials.password"])
 	assert.Equal(t, "0.0.0.0", data["server.address"])
 	assert.Equal(t, 30, data["server.timeout"])
-	
+
 	// Arrays should be preserved
 	features, ok := data["features"].([]any)
 	require.True(t, ok, "features should be an array")
@@ -117,10 +117,10 @@ address = "127.0.0.1"
 
 func TestFileSource_FormatInference(t *testing.T) {
 	tests := []struct {
-		name      string
-		filename  string
-		content   string
-		expected  map[string]any
+		name     string
+		filename string
+		content  string
+		expected map[string]any
 	}{
 		{
 			name:     "yaml extension",

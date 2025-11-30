@@ -109,7 +109,8 @@ func customValidator(ctx context.Context, cfg *AppConfig) error {
 func main() {
 	ctx := context.Background()
 
-	fmt.Println("=== Configuration Library Example ===\n")
+	fmt.Println("=== Configuration Library Example ===")
+	fmt.Println()
 
 	// Create a loader with multiple sources
 	// Sources are processed in order: file first, then environment variables
@@ -135,10 +136,12 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v\n", err)
 	}
 
-	fmt.Println("✓ Configuration loaded successfully!\n")
+	fmt.Println("✓ Configuration loaded successfully!")
+	fmt.Println()
 
 	// Display the loaded configuration
-	fmt.Println("=== Loaded Configuration ===\n")
+	fmt.Println("=== Loaded Configuration ===")
+	fmt.Println()
 	fmt.Printf("Environment: %s\n", cfg.Environment)
 	fmt.Printf("\nDatabase:\n")
 	fmt.Printf("  Host: %s\n", cfg.Database.Host)
@@ -180,7 +183,9 @@ func main() {
 	}
 
 	// Demonstrate provenance tracking
-	fmt.Println("\n=== Configuration Provenance ===\n")
+	fmt.Println()
+	fmt.Println("=== Configuration Provenance ===")
+	fmt.Println()
 	if prov, ok := rigging.GetProvenance(cfg); ok {
 		fmt.Println("Source information for each field:")
 		for _, field := range prov.Fields {
@@ -200,7 +205,9 @@ func main() {
 	}
 
 	// Demonstrate DumpEffective with source attribution
-	fmt.Println("\n=== Effective Configuration Dump ===\n")
+	fmt.Println()
+	fmt.Println("=== Effective Configuration Dump ===")
+	fmt.Println()
 	fmt.Println("Text format with source attribution:")
 	fmt.Println("---")
 	if err := rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources()); err != nil {

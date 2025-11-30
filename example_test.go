@@ -137,7 +137,7 @@ func ExampleDumpEffective() {
 
 	// Store minimal provenance for the example
 	// (normally this is done automatically during Load)
-	
+
 	// Dump configuration (secrets will be redacted)
 	rigging.DumpEffective(os.Stdout, cfg)
 
@@ -301,8 +301,8 @@ func ExampleValidationError() {
 	}
 
 	// Set invalid values
-	os.Setenv("EXVERR_PORT", "80")          // Below minimum
-	os.Setenv("EXVERR_ENV", "production")   // Not in oneof list
+	os.Setenv("EXVERR_PORT", "80")        // Below minimum
+	os.Setenv("EXVERR_ENV", "production") // Not in oneof list
 	defer func() {
 		os.Unsetenv("EXVERR_PORT")
 		os.Unsetenv("EXVERR_ENV")

@@ -61,7 +61,7 @@ func (f ValidatorFunc[T]) Validate(ctx context.Context, cfg *T) error {
 // Snapshot represents a configuration version emitted by Watch().
 type Snapshot[T any] struct {
 	Config   *T
-	Version  int64     // Increments on reload (starts at 1)
+	Version  int64 // Increments on reload (starts at 1)
 	LoadedAt time.Time
 	Source   string // What triggered the load
 }
