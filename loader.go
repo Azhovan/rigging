@@ -86,7 +86,7 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
-					Message:   fmt.Sprintf("unknown configuration key (strict mode)"),
+					Message:   "unknown configuration key (strict mode)",
 				})
 			}
 		}
