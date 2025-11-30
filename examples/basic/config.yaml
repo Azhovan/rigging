@@ -8,6 +8,7 @@ database:
   port: 5432
   name: myapp_staging
   user: app_user
+  password: staging_password_123
   maxconnections: 25
   sslmode: require
   connecttimeout: 10s
