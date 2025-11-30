@@ -11,10 +11,13 @@ Thanks for considering contributing to Rigging! This is a focused Go library for
 git clone https://github.com/Azhovan/rigging.git
 cd rigging
 
-# Run tests
-go test ./...
-go test -race ./...
-go test -cover ./...
+# Run CI checks (what GitHub Actions runs)
+make ci
+
+# Or run individual checks
+make test
+make test-race
+make fmt
 ```
 
 ## What We Value
@@ -116,21 +119,27 @@ We reject:
 - **Bloat**: Features that serve narrow use cases
 - **Complexity**: Clever code that's hard to maintain
 
-## Running the Full Test Suite
+## Development Commands
 
+**Using Make (recommended):**
 ```bash
-# Unit tests
-go test ./...
+make ci              # Run all CI checks locally
+make test            # Run tests
+make test-coverage   # Run tests with coverage report
+make fmt             # Format code
+make vet             # Run go vet
+make lint            # Run golangci-lint
+make build           # Build packages
+make all             # Format, vet, test, and build
+make help            # Show all commands
+```
 
-# Race detection
-go test -race ./...
-
-# Coverage
-go test -cover ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
-
-# Benchmarks
-go test -bench=. -benchmem ./...
+**Manual commands:**
+```bash
+go test ./...                           # Tests
+go test -race ./...                     # Race detection
+go test -coverprofile=coverage.out ./... # Coverage
+go tool cover -html=coverage.out        # View coverage
 ```
 
 ## Getting Help
