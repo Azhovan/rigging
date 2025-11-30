@@ -123,23 +123,19 @@ We reject:
 
 **Using Make (recommended):**
 ```bash
-make ci              # Run all CI checks locally
-make test            # Run tests
-make test-coverage   # Run tests with coverage report
-make fmt             # Format code
-make vet             # Run go vet
-make lint            # Run golangci-lint
-make build           # Build packages
-make all             # Format, vet, test, and build
-make help            # Show all commands
+make ci       # Run all CI checks (fmt, vet, test, lint)
+make test     # Run tests
+make fmt      # Format code
+make vet      # Run go vet
+make lint     # Run golangci-lint
+make clean    # Clean artifacts
 ```
 
 **Manual commands:**
 ```bash
-go test ./...                           # Tests
-go test -race ./...                     # Race detection
-go test -coverprofile=coverage.out ./... # Coverage
-go tool cover -html=coverage.out        # View coverage
+go test -race ./...                     # Tests
+go vet ./...                            # Vet
+gofmt -s -w .                           # Format
 ```
 
 ## Getting Help
