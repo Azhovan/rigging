@@ -181,12 +181,8 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 	}
 
 	// Check if target is Optional[T]
-	if targetType.Kind() == reflect.Struct &&
-		targetType.NumField() == 2 &&
-		targetType.Field(0).Name == "Value" &&
-		targetType.Field(1).Name == "Set" &&
-		targetType.Field(1).Type.Kind() == reflect.Bool {
-		// This is an Optional[T] type
+	if isOptionalType(targetType) {
+		// Extract the inner type T from Optional[T]
 		innerType := targetType.Field(0).Type
 		innerValue, err := convertValue(rawValue, innerType)
 		if err != nil {
