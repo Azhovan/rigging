@@ -637,6 +637,7 @@ type FieldError struct {
 - `max` - Value exceeds maximum
 - `oneof` - Value not in allowed set
 - `invalid_type` - Type conversion failed
+- `unknown_key` - Configuration key doesn't map to any field (strict mode)
 
 ### Struct Tags
 
