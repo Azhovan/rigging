@@ -355,6 +355,7 @@ Implement the `Source` interface:
 type Source interface {
     Load(ctx context.Context) (map[string]any, error)
     Watch(ctx context.Context) (<-chan ChangeEvent, error)
+    Name() string // Returns human-readable identifier
 }
 
 // Example: Consul KV store
@@ -365,7 +366,35 @@ type ConsulSource struct {
 func (s *ConsulSource) Load(ctx context.Context) (map[string]any, error) {
     // Fetch from Consul
 }
+
+func (s *ConsulSource) Name() string {
+    return "consul:kv"
+}
 ```
+
+**Enhanced Provenance (Optional):**
+
+Implement `SourceWithKeys` to provide detailed source attribution:
+
+```go
+type SourceWithKeys interface {
+    Source
+    LoadWithKeys(ctx context.Context) (data map[string]any, originalKeys map[string]string, err error)
+}
+
+func (s *ConsulSource) LoadWithKeys(ctx context.Context) (map[string]any, map[string]string, error) {
+    data := make(map[string]any)
+    originalKeys := make(map[string]string)
+    
+    // Load from Consul
+    data["database.host"] = "localhost"
+    originalKeys["database.host"] = "config/database/host" // Original Consul key
+    
+    return data, originalKeys, nil
+}
+```
+
+This enables detailed provenance like `consul:kv:config/database/host` for non-file sources (environment variables, remote stores, etc.). For file sources, just the source name is sufficient.
 
 ## Watch and Reload
 
@@ -595,7 +624,7 @@ type Provenance struct {
 type FieldProvenance struct {
     FieldPath  string // e.g., "Database.Host"
     KeyPath    string // e.g., "database.host"
-    SourceName string // e.g., "file:config.yaml"
+    SourceName string // e.g., "file:config.yaml" or "env:APP_DATABASE__PASSWORD"
     Secret     bool   // true if marked as secret
 }
 ```

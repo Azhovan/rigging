@@ -413,6 +413,7 @@ func parseStringSlice(rawValue any) ([]string, error) {
 type mergedEntry struct {
 	value      any
 	sourceName string
+	sourceKey  string // Original key from the source (e.g., "API_DATABASE__PASSWORD")
 }
 
 // bindStruct binds configuration data to a struct using reflection.
@@ -526,10 +527,16 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 
 			// Record provenance
 			if provenanceFields != nil {
+				// Use sourceKey from entry if available, otherwise use sourceName
+				sourceInfo := sourceName
+				if found && entry.sourceKey != "" {
+					sourceInfo = entry.sourceKey
+				}
+
 				*provenanceFields = append(*provenanceFields, FieldProvenance{
 					FieldPath:  fieldPath,
 					KeyPath:    keyPath,
-					SourceName: sourceName,
+					SourceName: sourceInfo,
 					Secret:     tagCfg.secret,
 				})
 			}

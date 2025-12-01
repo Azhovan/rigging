@@ -14,6 +14,18 @@ type Source interface {
 
 	// Watch emits ChangeEvent when configuration changes. Returns ErrWatchNotSupported if not supported.
 	Watch(ctx context.Context) (<-chan ChangeEvent, error)
+
+	// Name returns a human-readable identifier for this source (e.g., "env:API_", "file:config.yaml").
+	Name() string
+}
+
+// SourceWithKeys is an optional interface that sources can implement to provide
+// original key information for better provenance tracking.
+type SourceWithKeys interface {
+	Source
+	// LoadWithKeys returns configuration with original keys mapped to normalized keys.
+	// The returned map has normalized keys, and originalKeys maps normalized -> original.
+	LoadWithKeys(ctx context.Context) (data map[string]any, originalKeys map[string]string, err error)
 }
 
 // ChangeEvent notifies of configuration changes.

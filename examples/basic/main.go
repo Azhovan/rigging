@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	rigging "github.com/Azhovan/rigging"
+	"github.com/Azhovan/rigging"
 	"github.com/Azhovan/rigging/sourceenv"
 	"github.com/Azhovan/rigging/sourcefile"
 )
@@ -19,18 +19,18 @@ type DatabaseConfig struct {
 	Name           string        `conf:"required"`
 	User           string        `conf:"required"`
 	Password       string        `conf:"secret,required"`
-	Maxconnections int           `conf:"default:10,min:1,max:100"`
-	Sslmode        string        `conf:"default:disable,oneof:disable,require,verify-ca,verify-full"`
-	Connecttimeout time.Duration `conf:"default:5s"`
+	MaxConnections int           `conf:"default:10,min:1,max:100"`
+	SSLMode        string        `conf:"default:disable,oneof:disable,require,verify-ca,verify-full"`
+	ConnectTimeout time.Duration `conf:"default:5s"`
 }
 
 // ServerConfig holds HTTP server settings
 type ServerConfig struct {
 	Host            string        `conf:"default:localhost"`
 	Port            int           `conf:"default:8080,min:1024,max:65535"`
-	Readtimeout     time.Duration `conf:"default:15s"`
-	Writetimeout    time.Duration `conf:"default:15s"`
-	Shutdowntimeout time.Duration `conf:"default:5s"`
+	ReadTimeout     time.Duration `conf:"default:15s"`
+	WriteTimeout    time.Duration `conf:"default:15s"`
+	ShutdownTimeout time.Duration `conf:"default:5s"`
 }
 
 // LoggingConfig holds logging settings
@@ -42,9 +42,9 @@ type LoggingConfig struct {
 
 // FeaturesConfig holds feature flags
 type FeaturesConfig struct {
-	Enablemetrics rigging.Optional[bool]
-	Enabletracing rigging.Optional[bool]
-	Ratelimit     rigging.Optional[int] `conf:"min:1"`
+	EnableMetrics rigging.Optional[bool]
+	EnableTracing rigging.Optional[bool]
+	RateLimit     rigging.Optional[int] `conf:"min:1"`
 }
 
 // AppConfig is the root configuration structure
@@ -70,9 +70,9 @@ func customValidator(ctx context.Context, cfg *AppConfig) error {
 			})
 		}
 
-		if cfg.Database.Sslmode == "disable" {
+		if cfg.Database.SSLMode == "disable" {
 			fieldErrors = append(fieldErrors, rigging.FieldError{
-				FieldPath: "Database.Sslmode",
+				FieldPath: "Database.SSLMode",
 				Code:      "insecure_prod_ssl",
 				Message:   "production environment must use SSL for database connections",
 			})
@@ -89,10 +89,10 @@ func customValidator(ctx context.Context, cfg *AppConfig) error {
 	}
 
 	// If metrics are enabled, rate limit should be set
-	if metricsEnabled, ok := cfg.Features.Enablemetrics.Get(); ok && metricsEnabled {
-		if rateLimit, ok := cfg.Features.Ratelimit.Get(); !ok || rateLimit == 0 {
+	if metricsEnabled, ok := cfg.Features.EnableMetrics.Get(); ok && metricsEnabled {
+		if rateLimit, ok := cfg.Features.RateLimit.Get(); !ok || rateLimit == 0 {
 			fieldErrors = append(fieldErrors, rigging.FieldError{
-				FieldPath: "Features.Ratelimit",
+				FieldPath: "Features.RateLimit",
 				Code:      "missing_rate_limit",
 				Message:   "rate_limit must be set when metrics are enabled",
 			})
@@ -115,8 +115,15 @@ func main() {
 	// Create a loader with multiple sources
 	// Sources are processed in order: file first, then environment variables
 	// Environment variables will override file values
+
+	// Try to find config.yaml in current directory or examples/basic directory
+	configPath := "config.yaml"
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = "examples/basic/config.yaml"
+	}
+
 	loader := rigging.NewLoader[AppConfig]().
-		WithSource(sourcefile.New("config.yaml", sourcefile.Options{
+		WithSource(sourcefile.New(configPath, sourcefile.Options{
 			Required: false, // Make file optional for demo purposes
 		})).
 		WithSource(sourceenv.New(sourceenv.Options{
@@ -149,16 +156,16 @@ func main() {
 	fmt.Printf("  Name: %s\n", cfg.Database.Name)
 	fmt.Printf("  User: %s\n", cfg.Database.User)
 	fmt.Printf("  Password: [REDACTED]\n")
-	fmt.Printf("  Max Connections: %d\n", cfg.Database.Maxconnections)
-	fmt.Printf("  SSL Mode: %s\n", cfg.Database.Sslmode)
-	fmt.Printf("  Connect Timeout: %s\n", cfg.Database.Connecttimeout)
+	fmt.Printf("  Max Connections: %d\n", cfg.Database.MaxConnections)
+	fmt.Printf("  SSL Mode: %s\n", cfg.Database.SSLMode)
+	fmt.Printf("  Connect Timeout: %s\n", cfg.Database.ConnectTimeout)
 
 	fmt.Printf("\nServer:\n")
 	fmt.Printf("  Host: %s\n", cfg.Server.Host)
 	fmt.Printf("  Port: %d\n", cfg.Server.Port)
-	fmt.Printf("  Read Timeout: %s\n", cfg.Server.Readtimeout)
-	fmt.Printf("  Write Timeout: %s\n", cfg.Server.Writetimeout)
-	fmt.Printf("  Shutdown Timeout: %s\n", cfg.Server.Shutdowntimeout)
+	fmt.Printf("  Read Timeout: %s\n", cfg.Server.ReadTimeout)
+	fmt.Printf("  Write Timeout: %s\n", cfg.Server.WriteTimeout)
+	fmt.Printf("  Shutdown Timeout: %s\n", cfg.Server.ShutdownTimeout)
 
 	fmt.Printf("\nLogging:\n")
 	fmt.Printf("  Level: %s\n", cfg.Logging.Level)
@@ -166,17 +173,17 @@ func main() {
 	fmt.Printf("  Output: %s\n", cfg.Logging.Output)
 
 	fmt.Printf("\nFeatures:\n")
-	if metrics, ok := cfg.Features.Enablemetrics.Get(); ok {
+	if metrics, ok := cfg.Features.EnableMetrics.Get(); ok {
 		fmt.Printf("  Enable Metrics: %v\n", metrics)
 	} else {
 		fmt.Printf("  Enable Metrics: [not set]\n")
 	}
-	if tracing, ok := cfg.Features.Enabletracing.Get(); ok {
+	if tracing, ok := cfg.Features.EnableTracing.Get(); ok {
 		fmt.Printf("  Enable Tracing: %v\n", tracing)
 	} else {
 		fmt.Printf("  Enable Tracing: [not set]\n")
 	}
-	if rateLimit, ok := cfg.Features.Ratelimit.Get(); ok {
+	if rateLimit, ok := cfg.Features.RateLimit.Get(); ok {
 		fmt.Printf("  Rate Limit: %d\n", rateLimit)
 	} else {
 		fmt.Printf("  Rate Limit: [not set]\n")
@@ -186,20 +193,21 @@ func main() {
 	fmt.Println()
 	fmt.Println("=== Configuration Provenance ===")
 	fmt.Println()
+	fmt.Println("Track exactly where each configuration value came from:")
+	fmt.Println()
 	if prov, ok := rigging.GetProvenance(cfg); ok {
-		fmt.Println("Source information for each field:")
+		fmt.Println("Field -> Source")
+		fmt.Println("----------------------------------------")
 		for _, field := range prov.Fields {
 			secretMarker := ""
 			if field.Secret {
 				secretMarker = " [SECRET]"
 			}
-			fmt.Printf("  %s = %s (from %s)%s\n",
-				field.FieldPath,
-				field.KeyPath,
-				field.SourceName,
-				secretMarker,
-			)
+			fmt.Printf("%-30s -> %s%s\n", field.FieldPath, field.SourceName, secretMarker)
 		}
+		fmt.Println()
+		fmt.Println("Environment variables are shown with their full names (e.g., env:APP_DATABASE__PASSWORD)")
+		fmt.Println("This helps verify which env var was actually used.")
 	} else {
 		fmt.Println("Provenance information not available")
 	}

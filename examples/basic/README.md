@@ -1,44 +1,38 @@
-# Example
+# Basic Example
 
-Demonstrates core Rigging features:
-- Multi-source loading (YAML + env vars)
-- Struct tag validation
-- Custom validators
-- Secret redaction
-- Provenance tracking
+Hands-on demonstration of Rigging's core features with a complete working example.
 
-## Run
+## Quick Start
 
 ```bash
+# Run with default config.yaml
 go run main.go
 
 # Override with environment variables
-export APP_DATABASE__PASSWORD=secret
-export APP_ENVIRONMENT=production
+export APP_DATABASE__PASSWORD=secret123
+export APP_SERVER__PORT=9090
 go run main.go
 ```
 
-## Key Points
+## Example Scenarios
 
-**Struct Tags**:
-```go
-type Config struct {
-    Port     int    `conf:"default:8080,min:1024"`
-    Password string `conf:"required,secret"`
-}
+```bash
+# Switch to production environment
+export APP_ENVIRONMENT=production
+export APP_DATABASE__HOST=prod-db.example.com
+go run main.go
+
+# Enable feature flags
+export APP_FEATURES__ENABLE_METRICS=true
+export APP_FEATURES__RATELIMIT=5000
+go run main.go
 ```
 
-**Environment Variables**: Use `__` for nesting
-- `APP_DATABASE__HOST` → `Database.Host`
-- `APP_SERVER__PORT` → `Server.Port`
-- Prefix matching is case-insensitive by default (`APP_`, `app_`, `App_` all match)
-- Set `CaseSensitive: true` in `sourceenv.Options` for exact matching
+## What This Example Shows
 
-**YAML Keys**: Match struct fields (lowercase)
-```yaml
-database:
-  host: localhost
-  port: 5432
-```
+- Multi-source loading (YAML + environment variables)
+- Tag-based and custom validation
+- Provenance tracking output
+- Secret redaction in config dumps
 
-Please See [main README](../../README.md) for full documentation.
+See the [main README](../../README.md) for complete documentation.
