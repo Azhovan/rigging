@@ -738,7 +738,6 @@ See the [examples](examples/) directory for complete working examples:
 ## Documentation
 
 - [API Reference](https://pkg.go.dev/github.com/Azhovan/rigging)
-- [Design Document](.kiro/specs/go-config-library/design.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
 ## FAQ
@@ -765,7 +764,3 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
-
-**Built with ❤️ for Go services that need reliable configuration.**

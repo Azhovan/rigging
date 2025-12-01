@@ -1,4 +1,4 @@
-# Basic Example
+# Example
 
 Demonstrates core Rigging features:
 - Multi-source loading (YAML + env vars)
@@ -41,4 +41,4 @@ database:
   port: 5432
 ```
 
-See [main README](../../README.md) for full documentation.
+Please See [main README](../../README.md) for full documentation.
