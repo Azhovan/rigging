@@ -457,3 +457,203 @@ func TestDumpEffective_SecretWithoutProvenance(t *testing.T) {
 		t.Logf("Note: Without provenance, secrets are not redacted. Output: %s", output)
 	}
 }
+
+func TestDumpEffective_JSONWithSources(t *testing.T) {
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     8080,
+		Password: "secret123",
+	}
+
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env:APP_HOST", Secret: false},
+			{FieldPath: "Port", KeyPath: "port", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Password", KeyPath: "password", SourceName: "env:APP_PASSWORD", Secret: true},
+		},
+	}
+	storeProvenance(cfg, prov)
+
+	var buf bytes.Buffer
+	err := DumpEffective(&buf, cfg, AsJSON(), WithSources())
+	if err != nil {
+		t.Fatalf("DumpEffective failed: %v", err)
+	}
+
+	// Parse JSON
+	var result map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	// Check that each field is wrapped with value and source
+	host, ok := result["host"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected host to be a map with value and source, got: %T", result["host"])
+	}
+	if host["value"] != "localhost" {
+		t.Errorf("Expected host value=localhost, got: %v", host["value"])
+	}
+	if host["source"] != "env:APP_HOST" {
+		t.Errorf("Expected host source=env:APP_HOST, got: %v", host["source"])
+	}
+
+	port, ok := result["port"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected port to be a map with value and source, got: %T", result["port"])
+	}
+	if port["value"] != float64(8080) {
+		t.Errorf("Expected port value=8080, got: %v", port["value"])
+	}
+	if port["source"] != "file:config.yaml" {
+		t.Errorf("Expected port source=file:config.yaml, got: %v", port["source"])
+	}
+
+	password, ok := result["password"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected password to be a map with value and source, got: %T", result["password"])
+	}
+	if password["value"] != "***redacted***" {
+		t.Errorf("Expected password to be redacted, got: %v", password["value"])
+	}
+	if password["source"] != "env:APP_PASSWORD" {
+		t.Errorf("Expected password source=env:APP_PASSWORD, got: %v", password["source"])
+	}
+}
+
+func TestDumpEffective_JSONWithoutSources(t *testing.T) {
+	type Config struct {
+		Host string `conf:"name:host"`
+		Port int    `conf:"name:port"`
+	}
+
+	cfg := &Config{
+		Host: "localhost",
+		Port: 8080,
+	}
+
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env:APP_HOST", Secret: false},
+			{FieldPath: "Port", KeyPath: "port", SourceName: "file:config.yaml", Secret: false},
+		},
+	}
+	storeProvenance(cfg, prov)
+
+	var buf bytes.Buffer
+	err := DumpEffective(&buf, cfg, AsJSON()) // No WithSources()
+	if err != nil {
+		t.Fatalf("DumpEffective failed: %v", err)
+	}
+
+	// Parse JSON
+	var result map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	// Check that values are returned directly, not wrapped
+	if result["host"] != "localhost" {
+		t.Errorf("Expected host=localhost, got: %v", result["host"])
+	}
+	if result["port"] != float64(8080) {
+		t.Errorf("Expected port=8080, got: %v", result["port"])
+	}
+
+	// Ensure no source information is included
+	if _, ok := result["host"].(map[string]any); ok {
+		t.Errorf("Expected host to be a plain value, not a map with source info")
+	}
+}
+
+func TestDumpEffective_JSONNestedWithSources(t *testing.T) {
+	type Database struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	type Config struct {
+		AppName  string   `conf:"name:app_name"`
+		Database Database `conf:"prefix:database"`
+	}
+
+	cfg := &Config{
+		AppName: "myapp",
+		Database: Database{
+			Host:     "db.example.com",
+			Port:     5432,
+			Password: "dbpass",
+		},
+	}
+
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "AppName", KeyPath: "app_name", SourceName: "env:APP_NAME", Secret: false},
+			{FieldPath: "Database.Host", KeyPath: "database.host", SourceName: "file:db.yaml", Secret: false},
+			{FieldPath: "Database.Port", KeyPath: "database.port", SourceName: "file:db.yaml", Secret: false},
+			{FieldPath: "Database.Password", KeyPath: "database.password", SourceName: "env:DB_PASSWORD", Secret: true},
+		},
+	}
+	storeProvenance(cfg, prov)
+
+	var buf bytes.Buffer
+	err := DumpEffective(&buf, cfg, AsJSON(), WithSources())
+	if err != nil {
+		t.Fatalf("DumpEffective failed: %v", err)
+	}
+
+	// Parse JSON
+	var result map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	// Check app_name with source
+	appName, ok := result["app_name"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected app_name to be a map with value and source, got: %T", result["app_name"])
+	}
+	if appName["value"] != "myapp" {
+		t.Errorf("Expected app_name value=myapp, got: %v", appName["value"])
+	}
+	if appName["source"] != "env:APP_NAME" {
+		t.Errorf("Expected app_name source=env:APP_NAME, got: %v", appName["source"])
+	}
+
+	// Check nested database structure
+	database, ok := result["database"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected database to be a map, got: %T", result["database"])
+	}
+
+	// Check database.host with source
+	dbHost, ok := database["host"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected database.host to be a map with value and source, got: %T", database["host"])
+	}
+	if dbHost["value"] != "db.example.com" {
+		t.Errorf("Expected database.host value=db.example.com, got: %v", dbHost["value"])
+	}
+	if dbHost["source"] != "file:db.yaml" {
+		t.Errorf("Expected database.host source=file:db.yaml, got: %v", dbHost["source"])
+	}
+
+	// Check database.password is redacted with source
+	dbPassword, ok := database["password"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected database.password to be a map with value and source, got: %T", database["password"])
+	}
+	if dbPassword["value"] != "***redacted***" {
+		t.Errorf("Expected database.password to be redacted, got: %v", dbPassword["value"])
+	}
+	if dbPassword["source"] != "env:DB_PASSWORD" {
+		t.Errorf("Expected database.password source=env:DB_PASSWORD, got: %v", dbPassword["source"])
+	}
+}
