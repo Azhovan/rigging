@@ -104,7 +104,7 @@ func dumpAsText(w io.Writer, v reflect.Value, provenanceMap map[string]*FieldPro
 // dumpAsJSON outputs configuration as JSON with secret redaction.
 func dumpAsJSON(w io.Writer, v reflect.Value, provenanceMap map[string]*FieldProvenance, config dumpConfig) error {
 	// Build a nested map structure for JSON output
-	result := buildJSONStructure(v, "", provenanceMap)
+	result := buildJSONStructure(v, "", provenanceMap, config.withSources)
 
 	// Marshal to JSON
 	var data []byte
@@ -242,7 +242,7 @@ func collectFieldsWithPath(v reflect.Value, fieldPathPrefix string, keyPathPrefi
 }
 
 // buildJSONStructure recursively builds a nested map for JSON output.
-func buildJSONStructure(v reflect.Value, prefix string, provenanceMap map[string]*FieldProvenance) map[string]any {
+func buildJSONStructure(v reflect.Value, prefix string, provenanceMap map[string]*FieldProvenance, withSources bool) map[string]any {
 	result := make(map[string]any)
 
 	t := v.Type()
@@ -287,23 +287,36 @@ func buildJSONStructure(v reflect.Value, prefix string, provenanceMap map[string
 				setField := fieldValue.FieldByName("Set")
 				valueField := fieldValue.FieldByName("Value")
 				if setField.IsValid() && setField.Bool() && valueField.IsValid() {
-					result[jsonKey] = formatValueForJSON(valueField, prov)
+					result[jsonKey] = buildJSONFieldValue(formatValueForJSON(valueField, prov), prov, withSources)
 				} else {
 					result[jsonKey] = nil
 				}
 			} else {
 				// Regular nested struct
 				nestedPrefix := fieldPath
-				result[jsonKey] = buildJSONStructure(fieldValue, nestedPrefix, provenanceMap)
+				result[jsonKey] = buildJSONStructure(fieldValue, nestedPrefix, provenanceMap, withSources)
 			}
 			continue
 		}
 
 		// Format value for JSON
-		result[jsonKey] = formatValueForJSON(fieldValue, prov)
+		result[jsonKey] = buildJSONFieldValue(formatValueForJSON(fieldValue, prov), prov, withSources)
 	}
 
 	return result
+}
+
+// buildJSONFieldValue wraps a value with source information if requested.
+func buildJSONFieldValue(value any, prov *FieldProvenance, withSources bool) any {
+	if !withSources || prov == nil || prov.SourceName == "" {
+		return value
+	}
+
+	// When sources are requested, return an object with value and source
+	return map[string]any{
+		"value":  value,
+		"source": prov.SourceName,
+	}
 }
 
 // formatValue formats a field value as a string, redacting secrets.

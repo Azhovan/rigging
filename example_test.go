@@ -79,10 +79,12 @@ func ExampleLoader_Load() {
 
 	fmt.Printf("Timeout: %v\n", cfg.Timeout)
 	fmt.Printf("MaxRetries: %d\n", cfg.MaxRetries)
+	fmt.Printf("APIKey: %s\n", cfg.APIKey)
 
 	// Output:
 	// Timeout: 30s
 	// MaxRetries: 3
+	// APIKey: test-key-12345
 }
 
 // ExampleLoader_WithValidator demonstrates custom validation.
@@ -186,18 +188,30 @@ func ExampleDumpEffective_asJSON() {
 		Port        int    `conf:"default:8080"`
 	}
 
-	cfg := &Config{
-		Environment: "dev",
-		Port:        8080,
+	os.Setenv("EXJSON_ENVIRONMENT", "production")
+	defer os.Unsetenv("EXJSON_ENVIRONMENT")
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXJSON_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Dump as JSON
-	rigging.DumpEffective(os.Stdout, cfg, rigging.AsJSON())
+	// Dump as JSON with source attribution
+	rigging.DumpEffective(os.Stdout, cfg, rigging.AsJSON(), rigging.WithSources())
 
 	// Output:
 	// {
-	//   "environment": "dev",
-	//   "port": 8080
+	//   "environment": {
+	//     "source": "env:EXJSON_ENVIRONMENT",
+	//     "value": "production"
+	//   },
+	//   "port": {
+	//     "source": "default",
+	//     "value": 8080
+	//   }
 	// }
 }
 
