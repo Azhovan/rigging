@@ -52,8 +52,18 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 	mergedData := make(map[string]mergedEntry)
 
 	for i, source := range l.sources {
-		// Load data from source
-		data, err := source.Load(ctx)
+		var data map[string]any
+		var originalKeys map[string]string
+		var err error
+
+		// Check if source implements SourceWithKeys for better provenance
+		if sourceWithKeys, ok := source.(SourceWithKeys); ok {
+			data, originalKeys, err = sourceWithKeys.LoadWithKeys(ctx)
+		} else {
+			data, err = source.Load(ctx)
+			originalKeys = nil
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("load source %d: %w", i, err)
 		}
@@ -64,11 +74,23 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 			// Normalize key to lowercase dot-separated path
 			normalizedKey := strings.ToLower(key)
 
-			// Store with source information
-			sourceName := fmt.Sprintf("source-%d", i)
+			// Determine source key for provenance
+			sourceKey := source.Name()
+			if originalKeys != nil {
+				if origKey, ok := originalKeys[normalizedKey]; ok {
+					// For env vars, append the full variable name (e.g., "env:APP_DATABASE__PASSWORD")
+					// For files, just use the filename (e.g., "file:config.yaml")
+					if !strings.HasPrefix(source.Name(), "file:") {
+						sourceKey = source.Name() + origKey
+					}
+					// For files, sourceKey remains just source.Name() (e.g., "file:config.yaml")
+				}
+			}
+
 			mergedData[normalizedKey] = mergedEntry{
 				value:      value,
-				sourceName: sourceName,
+				sourceName: source.Name(),
+				sourceKey:  sourceKey,
 			}
 		}
 	}

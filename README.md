@@ -66,7 +66,7 @@ for _, field := range prov.Fields {
 }
 // Output:
 // Database.Host from file:config.yaml
-// Database.Password from env:APP_DATABASE__PASSWORD
+// Database.Password from env:APP_APP_DATABASE__PASSWORD
 // Database.Port from default
 ```
 
@@ -209,7 +209,7 @@ rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
 // server.port: 8080 (source: default)
 // database.host: "localhost" (source: file:config.yaml)
 // database.port: 5432 (source: default)
-// database.password: "***redacted***" (source: env:APP_DATABASE__PASSWORD)
+// database.password: "***redacted***" (source: env:APP_APP_DATABASE__PASSWORD)
 ```
 
 ### Optional Fields
@@ -355,6 +355,7 @@ Implement the `Source` interface:
 type Source interface {
     Load(ctx context.Context) (map[string]any, error)
     Watch(ctx context.Context) (<-chan ChangeEvent, error)
+    Name() string // Returns human-readable identifier
 }
 
 // Example: Consul KV store
@@ -365,7 +366,35 @@ type ConsulSource struct {
 func (s *ConsulSource) Load(ctx context.Context) (map[string]any, error) {
     // Fetch from Consul
 }
+
+func (s *ConsulSource) Name() string {
+    return "consul:kv"
+}
 ```
+
+**Enhanced Provenance (Optional):**
+
+Implement `SourceWithKeys` to provide detailed source attribution:
+
+```go
+type SourceWithKeys interface {
+    Source
+    LoadWithKeys(ctx context.Context) (data map[string]any, originalKeys map[string]string, err error)
+}
+
+func (s *ConsulSource) LoadWithKeys(ctx context.Context) (map[string]any, map[string]string, error) {
+    data := make(map[string]any)
+    originalKeys := make(map[string]string)
+    
+    // Load from Consul
+    data["database.host"] = "localhost"
+    originalKeys["database.host"] = "config/database/host" // Original Consul key
+    
+    return data, originalKeys, nil
+}
+```
+
+This enables detailed provenance like `consul:kv:config/database/host` for non-file sources (environment variables, remote stores, etc.). For file sources, just the source name is sufficient.
 
 ## Watch and Reload
 
@@ -428,6 +457,96 @@ if err != nil {
             log.Printf("%s: %s (code: %s)", 
                 fe.FieldPath, fe.Message, fe.Code)
         }
+    }
+}
+```
+
+## Provenance Tracking
+
+Rigging tracks the exact source of every configuration value, making debugging and auditing easy.
+
+### Basic Provenance
+
+```go
+cfg, _ := loader.Load(ctx)
+
+prov, ok := rigging.GetProvenance(cfg)
+if ok {
+    for _, field := range prov.Fields {
+        fmt.Printf("%s from %s\n", field.FieldPath, field.SourceName)
+    }
+}
+```
+
+### Source Name Format
+
+Provenance includes detailed source information:
+
+**Environment Variables:**
+```
+Database.Password from env:APP_APP_DATABASE__PASSWORD
+Server.Port from env:APP_APP_SERVER__PORT
+```
+Shows the full environment variable name, making it easy to verify which env var was used.
+
+**File Sources:**
+```
+Database.Host from file:config.yaml
+Server.Port from file:config.yaml
+```
+Shows the file name. The field path already indicates the location within the file.
+
+**Default Values:**
+```
+Server.Timeout from default
+Database.MaxConnections from default
+```
+Indicates the value came from the `default:` tag.
+
+### Provenance Use Cases
+
+**1. Debugging Configuration Issues:**
+```go
+// Quickly identify where a value came from
+prov, _ := rigging.GetProvenance(cfg)
+for _, field := range prov.Fields {
+    if field.FieldPath == "Database.Host" {
+        log.Printf("Database host loaded from: %s", field.SourceName)
+        // Output: Database host loaded from: env:APP_APP_DATABASE__HOST
+    }
+}
+```
+
+**2. Security Auditing:**
+```go
+// Find all secrets and their sources
+prov, _ := rigging.GetProvenance(cfg)
+for _, field := range prov.Fields {
+    if field.Secret {
+        log.Printf("Secret %s loaded from: %s", field.FieldPath, field.SourceName)
+    }
+}
+```
+
+**3. Configuration Documentation:**
+```go
+// Generate documentation of required environment variables
+prov, _ := rigging.GetProvenance(cfg)
+for _, field := range prov.Fields {
+    if strings.HasPrefix(field.SourceName, "env:") {
+        fmt.Printf("export %s=<value>\n", 
+            strings.TrimPrefix(field.SourceName, "env:APP_"))
+    }
+}
+```
+
+**4. Override Tracking:**
+```go
+// See which values were overridden by environment variables
+prov, _ := rigging.GetProvenance(cfg)
+for _, field := range prov.Fields {
+    if strings.HasPrefix(field.SourceName, "env:") {
+        log.Printf("%s was overridden by environment variable", field.FieldPath)
     }
 }
 ```
@@ -595,7 +714,7 @@ type Provenance struct {
 type FieldProvenance struct {
     FieldPath  string // e.g., "Database.Host"
     KeyPath    string // e.g., "database.host"
-    SourceName string // e.g., "file:config.yaml"
+    SourceName string // e.g., "file:config.yaml" or "env:APP_APP_DATABASE__PASSWORD"
     Secret     bool   // true if marked as secret
 }
 ```

@@ -37,15 +37,21 @@ func New(path string, opts Options) rigging.Source {
 
 // Load reads and parses the file, returning flattened configuration.
 func (f *fileSource) Load(ctx context.Context) (map[string]any, error) {
+	result, _, err := f.LoadWithKeys(ctx)
+	return result, err
+}
+
+// LoadWithKeys reads and parses the file, returning flattened configuration with original keys.
+func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[string]string, error) {
 	data, err := os.ReadFile(f.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if f.opts.Required {
-				return nil, fmt.Errorf("required config file not found: %s: %w", f.path, err)
+				return nil, nil, fmt.Errorf("required config file not found: %s: %w", f.path, err)
 			}
-			return make(map[string]any), nil
+			return make(map[string]any), make(map[string]string), nil
 		}
-		return nil, fmt.Errorf("read config file %s: %w", f.path, err)
+		return nil, nil, fmt.Errorf("read config file %s: %w", f.path, err)
 	}
 
 	format := f.opts.Format
@@ -57,30 +63,67 @@ func (f *fileSource) Load(ctx context.Context) (map[string]any, error) {
 	switch format {
 	case "yaml", "yml":
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("parse YAML file %s: %w", f.path, err)
+			return nil, nil, fmt.Errorf("parse YAML file %s: %w", f.path, err)
 		}
 	case "json":
 		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("parse JSON file %s: %w", f.path, err)
+			return nil, nil, fmt.Errorf("parse JSON file %s: %w", f.path, err)
 		}
 	case "toml":
 		if err := toml.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("parse TOML file %s: %w", f.path, err)
+			return nil, nil, fmt.Errorf("parse TOML file %s: %w", f.path, err)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported file format: %s (supported: yaml, json, toml)", format)
+		return nil, nil, fmt.Errorf("unsupported file format: %s (supported: yaml, json, toml)", format)
 	}
 
 	// Flatten nested structures to dot-separated keys
 	flattened := make(map[string]any)
-	flattenMap("", raw, flattened)
+	originalKeys := make(map[string]string)
+	flattenMapWithKeys("", raw, flattened, originalKeys)
 
-	return flattened, nil
+	return flattened, originalKeys, nil
+}
+
+// flattenMapWithKeys recursively flattens nested maps to dot-separated keys and tracks original keys.
+func flattenMapWithKeys(prefix string, value any, result map[string]any, originalKeys map[string]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, val := range v {
+			newPrefix := key
+			if prefix != "" {
+				newPrefix = prefix + "." + key
+			}
+			flattenMapWithKeys(newPrefix, val, result, originalKeys)
+		}
+	case map[any]any:
+		for key, val := range v {
+			keyStr, ok := key.(string)
+			if !ok {
+				continue
+			}
+			newPrefix := keyStr
+			if prefix != "" {
+				newPrefix = prefix + "." + keyStr
+			}
+			flattenMapWithKeys(newPrefix, val, result, originalKeys)
+		}
+	default:
+		if prefix != "" {
+			result[prefix] = value
+			originalKeys[prefix] = prefix // For files, the key is already in the right format
+		}
+	}
 }
 
 // Watch returns ErrWatchNotSupported (file watching not yet implemented).
 func (f *fileSource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, error) {
 	return nil, rigging.ErrWatchNotSupported
+}
+
+// Name returns a human-readable identifier for this source.
+func (f *fileSource) Name() string {
+	return "file:" + filepath.Base(f.path)
 }
 
 func inferFormat(path string) string {
@@ -94,35 +137,5 @@ func inferFormat(path string) string {
 		return "toml"
 	default:
 		return ""
-	}
-}
-
-// flattenMap recursively flattens nested maps to dot-separated keys.
-func flattenMap(prefix string, value any, result map[string]any) {
-	switch v := value.(type) {
-	case map[string]any:
-		for key, val := range v {
-			newPrefix := key
-			if prefix != "" {
-				newPrefix = prefix + "." + key
-			}
-			flattenMap(newPrefix, val, result)
-		}
-	case map[any]any:
-		for key, val := range v {
-			keyStr, ok := key.(string)
-			if !ok {
-				continue
-			}
-			newPrefix := keyStr
-			if prefix != "" {
-				newPrefix = prefix + "." + keyStr
-			}
-			flattenMap(newPrefix, val, result)
-		}
-	default:
-		if prefix != "" {
-			result[prefix] = value
-		}
 	}
 }

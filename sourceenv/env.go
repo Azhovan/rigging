@@ -34,7 +34,14 @@ func New(opts Options) rigging.Source {
 
 // Load scans environment variables, filters by prefix, and normalizes keys.
 func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
+	result, _, err := e.LoadWithKeys(ctx)
+	return result, err
+}
+
+// LoadWithKeys scans environment variables and returns both data and original key mappings.
+func (e *envSource) LoadWithKeys(ctx context.Context) (map[string]any, map[string]string, error) {
 	result := make(map[string]any)
+	originalKeys := make(map[string]string)
 
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
@@ -42,8 +49,9 @@ func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
 			continue
 		}
 
-		key := parts[0]
+		originalKey := parts[0]
 		value := parts[1]
+		key := originalKey
 
 		if e.opts.Prefix != "" {
 			var hasPrefix bool
@@ -66,12 +74,21 @@ func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
 		// Normalize: FOO__BAR → foo.bar
 		normalizedKey := normalize.ToLowerDotPath(key)
 		result[normalizedKey] = value
+		originalKeys[normalizedKey] = originalKey
 	}
 
-	return result, nil
+	return result, originalKeys, nil
 }
 
 // Watch returns ErrWatchNotSupported (env vars don't change at runtime).
 func (e *envSource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, error) {
 	return nil, rigging.ErrWatchNotSupported
+}
+
+// Name returns a human-readable identifier for this source.
+func (e *envSource) Name() string {
+	if e.opts.Prefix != "" {
+		return "env:" + e.opts.Prefix
+	}
+	return "env"
 }

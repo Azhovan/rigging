@@ -115,8 +115,15 @@ func main() {
 	// Create a loader with multiple sources
 	// Sources are processed in order: file first, then environment variables
 	// Environment variables will override file values
+
+	// Try to find config.yaml in current directory or examples/basic directory
+	configPath := "config.yaml"
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = "examples/basic/config.yaml"
+	}
+
 	loader := rigging.NewLoader[AppConfig]().
-		WithSource(sourcefile.New("config.yaml", sourcefile.Options{
+		WithSource(sourcefile.New(configPath, sourcefile.Options{
 			Required: false, // Make file optional for demo purposes
 		})).
 		WithSource(sourceenv.New(sourceenv.Options{
@@ -186,19 +193,31 @@ func main() {
 	fmt.Println()
 	fmt.Println("=== Configuration Provenance ===")
 	fmt.Println()
+	fmt.Println("Track exactly where each configuration value came from:")
+	fmt.Println()
 	if prov, ok := rigging.GetProvenance(cfg); ok {
-		fmt.Println("Source information for each field:")
+		// Group by source for better readability
+		sourceGroups := make(map[string][]rigging.FieldProvenance)
 		for _, field := range prov.Fields {
-			secretMarker := ""
-			if field.Secret {
-				secretMarker = " [SECRET]"
+			// Extract source type (before the colon or the whole string)
+			sourceType := field.SourceName
+			if idx := len(field.SourceName); idx > 0 {
+				// Keep full source name for grouping
+				sourceGroups[sourceType] = append(sourceGroups[sourceType], field)
 			}
-			fmt.Printf("  %s = %s (from %s)%s\n",
-				field.FieldPath,
-				field.KeyPath,
-				field.SourceName,
-				secretMarker,
-			)
+		}
+
+		// Display grouped by source
+		for source, fields := range sourceGroups {
+			fmt.Printf("From %s:\n", source)
+			for _, field := range fields {
+				secretMarker := ""
+				if field.Secret {
+					secretMarker = " 🔒"
+				}
+				fmt.Printf("  • %s%s\n", field.FieldPath, secretMarker)
+			}
+			fmt.Println()
 		}
 	} else {
 		fmt.Println("Provenance information not available")

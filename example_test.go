@@ -338,6 +338,11 @@ func (s *staticSource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, e
 	return nil, rigging.ErrWatchNotSupported
 }
 
+// Name implements the Source interface for staticSource.
+func (s *staticSource) Name() string {
+	return "static"
+}
+
 // ExampleSource demonstrates implementing a custom source.
 func ExampleSource() {
 	// Create a custom source with static data

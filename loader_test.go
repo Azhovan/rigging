@@ -167,6 +167,13 @@ func (m *mockSource) Watch(ctx context.Context) (<-chan ChangeEvent, error) {
 	return nil, ErrWatchNotSupported
 }
 
+func (m *mockSource) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	return "mock"
+}
+
 // TestLoad_SingleSource verifies that Load works with a single source.
 func TestLoad_SingleSource(t *testing.T) {
 	type Config struct {
@@ -543,6 +550,13 @@ func (w *watchableSource) Watch(ctx context.Context) (<-chan ChangeEvent, error)
 		return nil, w.err
 	}
 	return w.changeCh, nil
+}
+
+func (w *watchableSource) Name() string {
+	if w.name != "" {
+		return w.name
+	}
+	return "watchable"
 }
 
 func (w *watchableSource) updateData(data map[string]any) {
