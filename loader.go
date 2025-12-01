@@ -78,10 +78,10 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 			sourceKey := source.Name()
 			if originalKeys != nil {
 				if origKey, ok := originalKeys[normalizedKey]; ok {
-					// For env vars, append the full variable name (e.g., "env:APP_DATABASE__PASSWORD")
+					// For env vars, use the full variable name (e.g., "env:APP_DATABASE__PASSWORD")
 					// For files, just use the filename (e.g., "file:config.yaml")
-					if !strings.HasPrefix(source.Name(), "file:") {
-						sourceKey = source.Name() + origKey
+					if strings.HasPrefix(source.Name(), "env") {
+						sourceKey = "env:" + origKey
 					}
 					// For files, sourceKey remains just source.Name() (e.g., "file:config.yaml")
 				}

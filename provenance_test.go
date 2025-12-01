@@ -280,9 +280,9 @@ func TestProvenance_WithSourceKeys(t *testing.T) {
 
 	// Verify each field has the correct original key
 	expectedSources := map[string]string{
-		"Host":     "env:APP_APP_HOST",
-		"Port":     "env:APP_APP_PORT",
-		"Password": "env:APP_APP_PASSWORD",
+		"Host":     "env:APP_HOST",
+		"Port":     "env:APP_PORT",
+		"Password": "env:APP_PASSWORD",
 	}
 
 	for _, field := range prov.Fields {
@@ -409,8 +409,8 @@ func TestProvenance_MultipleSources(t *testing.T) {
 	// Verify sources
 	expectedSources := map[string]string{
 		"Host":     "file:config.yaml",
-		"Port":     "env:APP_APP_PORT", // Should be from source2
-		"Database": "env:APP_APP_DATABASE",
+		"Port":     "env:APP_PORT", // Should be from source2
+		"Database": "env:APP_DATABASE",
 	}
 
 	for _, field := range prov.Fields {
@@ -474,7 +474,7 @@ func TestProvenance_DefaultValues(t *testing.T) {
 	expectedSources := map[string]string{
 		"Host": "default",
 		"Port": "default",
-		"Name": "env:APP_APP_NAME",
+		"Name": "env:APP_NAME",
 	}
 
 	for _, field := range prov.Fields {
@@ -537,10 +537,10 @@ func TestProvenance_NestedStructs(t *testing.T) {
 
 	// Verify sources
 	expectedSources := map[string]string{
-		"AppName":           "env:APP_APP_APPNAME",
-		"Database.Host":     "env:APP_APP_DB__HOST",
+		"AppName":           "env:APP_APPNAME",
+		"Database.Host":     "env:APP_DB__HOST",
 		"Database.Port":     "default",
-		"Database.Password": "env:APP_APP_DB__PASSWORD",
+		"Database.Password": "env:APP_DB__PASSWORD",
 	}
 
 	for _, field := range prov.Fields {
@@ -660,13 +660,13 @@ func TestProvenance_RealEnvSource(t *testing.T) {
 	// Verify sources include full env var names
 	for _, field := range prov.Fields {
 		if field.FieldPath == "Host" {
-			if field.SourceName != "env:TEST_TEST_HOST" {
-				t.Errorf("expected source %q, got %q", "env:TEST_TEST_HOST", field.SourceName)
+			if field.SourceName != "env:TEST_HOST" {
+				t.Errorf("expected source %q, got %q", "env:TEST_HOST", field.SourceName)
 			}
 		}
 		if field.FieldPath == "Port" {
-			if field.SourceName != "env:TEST_TEST_PORT" {
-				t.Errorf("expected source %q, got %q", "env:TEST_TEST_PORT", field.SourceName)
+			if field.SourceName != "env:TEST_PORT" {
+				t.Errorf("expected source %q, got %q", "env:TEST_PORT", field.SourceName)
 			}
 		}
 	}
@@ -788,9 +788,9 @@ func TestProvenance_MixedSources(t *testing.T) {
 	// Verify each field's source
 	expectedSources := map[string]string{
 		"Host":     "file:config.yaml",
-		"Port":     "env:APP_APP_PORT", // Overridden by env
-		"Database": "env:APP_APP_DATABASE",
-		"Secret":   "env:APP_APP_SECRET",
+		"Port":     "env:APP_PORT", // Overridden by env
+		"Database": "env:APP_DATABASE",
+		"Secret":   "env:APP_SECRET",
 	}
 
 	for _, field := range prov.Fields {

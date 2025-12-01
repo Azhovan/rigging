@@ -61,9 +61,9 @@ func Example() {
 // ExampleLoader_Load demonstrates loading configuration with validation.
 func ExampleLoader_Load() {
 	type Config struct {
-		Apikey     string        `conf:"required,secret"`
+		APIKey     string        `conf:"required,secret"`
 		Timeout    time.Duration `conf:"default:30s"`
-		Maxretries int           `conf:"default:3,min:1,max:10"`
+		MaxRetries int           `conf:"default:3,min:1,max:10"`
 	}
 
 	os.Setenv("EXLOAD_APIKEY", "test-key-12345")
@@ -78,28 +78,28 @@ func ExampleLoader_Load() {
 	}
 
 	fmt.Printf("Timeout: %v\n", cfg.Timeout)
-	fmt.Printf("Maxretries: %d\n", cfg.Maxretries)
+	fmt.Printf("MaxRetries: %d\n", cfg.MaxRetries)
 
 	// Output:
 	// Timeout: 30s
-	// Maxretries: 3
+	// MaxRetries: 3
 }
 
 // ExampleLoader_WithValidator demonstrates custom validation.
 func ExampleLoader_WithValidator() {
 	type Config struct {
 		Environment string `conf:"default:dev"`
-		Debugmode   bool   `conf:"default:false"`
+		DebugMode   bool   `conf:"default:false"`
 	}
 
 	loader := rigging.NewLoader[Config]().
 		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXVAL_"})).
 		WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
 			// Cross-field validation: debug mode not allowed in production
-			if cfg.Environment == "prod" && cfg.Debugmode {
+			if cfg.Environment == "prod" && cfg.DebugMode {
 				return &rigging.ValidationError{
 					FieldErrors: []rigging.FieldError{{
-						FieldPath: "Debugmode",
+						FieldPath: "DebugMode",
 						Code:      "invalid_prod_debug",
 						Message:   "debug mode cannot be enabled in production",
 					}},
@@ -114,35 +114,41 @@ func ExampleLoader_WithValidator() {
 	}
 
 	fmt.Printf("Environment: %s\n", cfg.Environment)
-	fmt.Printf("Debugmode: %t\n", cfg.Debugmode)
+	fmt.Printf("DebugMode: %t\n", cfg.DebugMode)
 
 	// Output:
 	// Environment: dev
-	// Debugmode: false
+	// DebugMode: false
 }
 
 // ExampleDumpEffective demonstrates dumping configuration with secret redaction.
 func ExampleDumpEffective() {
 	type Config struct {
-		APIKey   string `conf:"secret"`
-		Endpoint string
-		Timeout  time.Duration
+		APIKey   string        `conf:"secret,required"`
+		Endpoint string        `conf:"required"`
+		Timeout  time.Duration `conf:"default:30s"`
 	}
 
-	cfg := &Config{
-		APIKey:   "super-secret-key",
-		Endpoint: "https://api.example.com",
-		Timeout:  30 * time.Second,
-	}
+	os.Setenv("EXDMPEFF_APIKEY", "super-secret-key")
+	os.Setenv("EXDMPEFF_ENDPOINT", "https://api.example.com")
+	defer func() {
+		os.Unsetenv("EXDMPEFF_APIKEY")
+		os.Unsetenv("EXDMPEFF_ENDPOINT")
+	}()
 
-	// Store minimal provenance for the example
-	// (normally this is done automatically during Load)
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXDMPEFF_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Dump configuration (secrets will be redacted)
 	rigging.DumpEffective(os.Stdout, cfg)
 
-	// Output will show:
-	// aPIKey: "***redacted***"
+	// Output:
+	// apikey: ***redacted***
 	// endpoint: "https://api.example.com"
 	// timeout: 30s
 }
@@ -154,15 +160,23 @@ func ExampleDumpEffective_withSources() {
 		Host string `conf:"default:localhost"`
 	}
 
-	cfg := &Config{
-		Port: 8080,
-		Host: "localhost",
+	os.Setenv("EXDUMP_PORT", "9090")
+	defer os.Unsetenv("EXDUMP_PORT")
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXDUMP_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Dump with source information
 	rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
 
-	// Output will include source attribution
+	// Output:
+	// port: 9090 (source: env:EXDUMP_PORT)
+	// host: "localhost" (source: default)
 }
 
 // ExampleDumpEffective_asJSON demonstrates JSON output format.
@@ -213,19 +227,21 @@ func ExampleGetProvenance() {
 		}
 	}
 
-	// Output will show which source provided each field
+	// Output:
+	// Host from env:EXPROV_HOST
+	// Port from default
 }
 
 // ExampleOptional demonstrates using Optional fields.
 func ExampleOptional() {
 	type Config struct {
 		Timeout    rigging.Optional[time.Duration]
-		Maxretries rigging.Optional[int]
+		MaxRetries rigging.Optional[int]
 	}
 
 	cfg := &Config{}
 
-	// Set Timeout but not Maxretries
+	// Set Timeout but not MaxRetries
 	cfg.Timeout = rigging.Optional[time.Duration]{
 		Value: 30 * time.Second,
 		Set:   true,
@@ -236,19 +252,19 @@ func ExampleOptional() {
 		fmt.Printf("Timeout is set to: %v\n", timeout)
 	}
 
-	// Check if Maxretries was set
-	if _, ok := cfg.Maxretries.Get(); !ok {
-		fmt.Println("Maxretries was not set")
+	// Check if MaxRetries was set
+	if _, ok := cfg.MaxRetries.Get(); !ok {
+		fmt.Println("MaxRetries was not set")
 	}
 
 	// Use OrDefault for fallback values
-	maxRetries := cfg.Maxretries.OrDefault(3)
-	fmt.Printf("Maxretries (with default): %d\n", maxRetries)
+	maxRetries := cfg.MaxRetries.OrDefault(3)
+	fmt.Printf("MaxRetries (with default): %d\n", maxRetries)
 
 	// Output:
 	// Timeout is set to: 30s
-	// Maxretries was not set
-	// Maxretries (with default): 3
+	// MaxRetries was not set
+	// MaxRetries (with default): 3
 }
 
 // ExampleLoader_Strict demonstrates strict mode behavior.
@@ -423,4 +439,42 @@ func Example_envCaseSensitive() {
 	// Output:
 	// Case-insensitive: Host=dev.example.com, Port=9090
 	// Case-sensitive: Host=prod.example.com, Port=8080
+}
+
+// ExampleLoader_Watch demonstrates configuration watching.
+// Built-in sources (sourceenv, sourcefile) don't support watching yet.
+// Custom sources can implement Watch() to enable hot-reload.
+func ExampleLoader_Watch() {
+	type Config struct {
+		Host string `conf:"required"`
+		Port int    `conf:"default:8080"`
+	}
+
+	source := &staticSource{
+		data: map[string]any{
+			"host": "localhost",
+			"port": 8080,
+		},
+	}
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(source)
+
+	// Watch starts monitoring and returns channels
+	snapshots, errors, err := loader.Watch(context.Background())
+	if err != nil {
+		fmt.Printf("Watch failed: %v\n", err)
+		return
+	}
+
+	// Receive initial snapshot
+	snapshot := <-snapshots
+	fmt.Printf("Initial config loaded (version %d)\n", snapshot.Version)
+
+	// In a real application, you would monitor snapshots and errors
+	// in a goroutine for configuration updates
+	_ = errors
+
+	// Output:
+	// Initial config loaded (version 1)
 }
