@@ -125,6 +125,95 @@ func TestEnvSource_Load(t *testing.T) {
 	}
 }
 
+func TestEnvSource_CaseSensitivePrefix(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        Options
+		envVars     map[string]string
+		expected    map[string]any
+		notExpected []string
+	}{
+		{
+			name: "case sensitive prefix - exact match only",
+			opts: Options{Prefix: "APP_", CaseSensitive: true},
+			envVars: map[string]string{
+				"APP_HOST": "localhost",
+				"app_PORT": "8080",
+				"App_NAME": "myapp",
+			},
+			expected: map[string]any{
+				"host": "localhost",
+			},
+			notExpected: []string{"port", "name"},
+		},
+		{
+			name: "case insensitive prefix - matches all variations",
+			opts: Options{Prefix: "APP_", CaseSensitive: false},
+			envVars: map[string]string{
+				"APP_HOST": "localhost",
+				"app_PORT": "8080",
+				"App_NAME": "myapp",
+			},
+			expected: map[string]any{
+				"host": "localhost",
+				"port": "8080",
+				"name": "myapp",
+			},
+			notExpected: []string{},
+		},
+		{
+			name: "case sensitive with mixed case prefix",
+			opts: Options{Prefix: "MyApp_", CaseSensitive: true},
+			envVars: map[string]string{
+				"MyApp_HOST":  "localhost",
+				"MYAPP_PORT":  "8080",
+				"myapp_DEBUG": "true",
+			},
+			expected: map[string]any{
+				"host": "localhost",
+			},
+			notExpected: []string{"port", "debug"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up environment variables
+			for k, v := range tt.envVars {
+				os.Setenv(k, v)
+				defer os.Unsetenv(k)
+			}
+
+			source := New(tt.opts)
+			ctx := context.Background()
+
+			result, err := source.Load(ctx)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			// Check expected keys
+			for key, expectedValue := range tt.expected {
+				actualValue, ok := result[key]
+				if !ok {
+					t.Errorf("expected key %q not found in result", key)
+					continue
+				}
+				if actualValue != expectedValue {
+					t.Errorf("key %q: got %v, want %v", key, actualValue, expectedValue)
+				}
+			}
+
+			// Check that unexpected keys are not present
+			for _, key := range tt.notExpected {
+				if _, ok := result[key]; ok {
+					t.Errorf("unexpected key %q found in result", key)
+				}
+			}
+		})
+	}
+}
+
 func TestEnvSource_Watch(t *testing.T) {
 	source := New(Options{})
 	ctx := context.Background()

@@ -12,11 +12,14 @@ import (
 // Options configures environment variable source behavior.
 type Options struct {
 	// Prefix filters vars starting with prefix (stripped before normalization).
-	// Case-insensitive. Empty = load all vars.
+	// Empty = load all vars.
+	// Prefix matching behavior is controlled by CaseSensitive.
 	Prefix string
 
 	// CaseSensitive controls prefix matching (default: false).
-	// Keys are always normalized to lowercase after stripping.
+	// When false, prefix matching is case-insensitive (APP_ matches app_, App_, etc.).
+	// When true, prefix must match exactly.
+	// Keys are always normalized to lowercase after prefix stripping.
 	CaseSensitive bool
 }
 
@@ -42,9 +45,15 @@ func (e *envSource) Load(ctx context.Context) (map[string]any, error) {
 		key := parts[0]
 		value := parts[1]
 
-		// Filter and strip prefix
 		if e.opts.Prefix != "" {
-			if !strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(e.opts.Prefix)) {
+			var hasPrefix bool
+			if e.opts.CaseSensitive {
+				hasPrefix = strings.HasPrefix(key, e.opts.Prefix)
+			} else {
+				hasPrefix = strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(e.opts.Prefix))
+			}
+
+			if !hasPrefix {
 				continue
 			}
 			key = key[len(e.opts.Prefix):]

@@ -304,12 +304,36 @@ All errors are collected and returned together.
 
 ```go
 source := sourceenv.New(sourceenv.Options{
-    Prefix: "APP_",  // Only load APP_* variables
+    Prefix:        "APP_",  // Only load APP_* variables
+    CaseSensitive: false,   // Prefix matching is case-insensitive (default)
 })
 
 // Maps environment variables to struct fields:
 // APP_DATABASE__HOST → Database.Host
 // APP_SERVER__PORT → Server.Port
+```
+
+**Prefix Matching:**
+- By default (`CaseSensitive: false`), prefix matching is case-insensitive
+- `APP_`, `app_`, and `App_` all match when prefix is `"APP_"`
+- Set `CaseSensitive: true` for exact case matching
+- Keys are always normalized to lowercase after prefix stripping
+
+```go
+// Case-insensitive (default) - matches all variations
+sourceenv.New(sourceenv.Options{
+    Prefix:        "APP_",
+    CaseSensitive: false,
+})
+// Matches: APP_HOST, app_host, App_Host
+
+// Case-sensitive - exact match only
+sourceenv.New(sourceenv.Options{
+    Prefix:        "APP_",
+    CaseSensitive: true,
+})
+// Matches: APP_HOST only
+// Ignores: app_host, App_Host
 ```
 
 ### Files (YAML/JSON/TOML)

@@ -366,3 +366,56 @@ func ExampleSource() {
 	// Output:
 	// Host: localhost, Port: 8080
 }
+
+// Example_envCaseSensitive demonstrates case-sensitive prefix matching.
+func Example_envCaseSensitive() {
+	type Config struct {
+		Host string `conf:"required"`
+		Port int    `conf:"required"`
+	}
+
+	// Set environment variables with different cases
+	os.Setenv("APP_HOST", "prod.example.com")
+	os.Setenv("APP_PORT", "8080")
+	os.Setenv("app_host", "dev.example.com") // lowercase prefix
+	os.Setenv("app_port", "9090")            // lowercase prefix
+	defer func() {
+		os.Unsetenv("APP_HOST")
+		os.Unsetenv("APP_PORT")
+		os.Unsetenv("app_host")
+		os.Unsetenv("app_port")
+	}()
+
+	// Case-insensitive (default) - matches all variations
+	// Both APP_* and app_* are loaded, later ones override
+	loaderInsensitive := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{
+			Prefix:        "APP_",
+			CaseSensitive: false, // default
+		}))
+
+	cfg, err := loaderInsensitive.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Case-insensitive: Host=%s, Port=%d\n", cfg.Host, cfg.Port)
+
+	// Case-sensitive - only exact match (APP_* only)
+	loaderSensitive := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{
+			Prefix:        "APP_",
+			CaseSensitive: true,
+		}))
+
+	cfg2, err := loaderSensitive.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Case-sensitive: Host=%s, Port=%d\n", cfg2.Host, cfg2.Port)
+
+	// Output:
+	// Case-insensitive: Host=dev.example.com, Port=9090
+	// Case-sensitive: Host=prod.example.com, Port=8080
+}

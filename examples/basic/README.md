@@ -31,6 +31,8 @@ type Config struct {
 **Environment Variables**: Use `__` for nesting
 - `APP_DATABASE__HOST` → `Database.Host`
 - `APP_SERVER__PORT` → `Server.Port`
+- Prefix matching is case-insensitive by default (`APP_`, `app_`, `App_` all match)
+- Set `CaseSensitive: true` in `sourceenv.Options` for exact matching
 
 **YAML Keys**: Match struct fields (lowercase)
 ```yaml
