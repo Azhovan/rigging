@@ -40,15 +40,15 @@ func TestEnvSource_Load(t *testing.T) {
 			},
 		},
 		{
-			name: "single underscore preserved",
+			name: "single underscore stripped",
 			opts: Options{},
 			envVars: map[string]string{
 				"DB_MAX_CONNECTIONS": "100",
 				"API__RATE_LIMIT":    "1000",
 			},
 			expected: map[string]any{
-				"db_max_connections": "100",
-				"api.rate_limit":     "1000",
+				"dbmaxconnections": "100",
+				"api.ratelimit":    "1000",
 			},
 		},
 		{
@@ -240,10 +240,10 @@ func TestEnvSource_EmptyValues(t *testing.T) {
 	}
 
 	// Empty values should still be included
-	if val, ok := result["empty_var"]; !ok {
-		t.Error("expected empty_var to be present")
+	if val, ok := result["emptyvar"]; !ok {
+		t.Error("expected emptyvar to be present")
 	} else if val != "" {
-		t.Errorf("empty_var = %v, want empty string", val)
+		t.Errorf("emptyvar = %v, want empty string", val)
 	}
 }
 
