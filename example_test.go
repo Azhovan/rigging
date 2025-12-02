@@ -455,6 +455,42 @@ func Example_envCaseSensitive() {
 	// Case-sensitive: Host=prod.example.com, Port=8080
 }
 
+// Example_underscoreNormalization demonstrates how underscores in environment
+// variables are normalized to match camelCase field names.
+func Example_underscoreNormalization() {
+	type Config struct {
+		MaxConnections int
+		APIKey         string
+	}
+
+	// All these environment variable formats match the same fields:
+	// - Single underscores are stripped for flexible matching
+	// - Double underscores (__) create nested structures
+	// - Everything is case-insensitive
+
+	os.Setenv("EXNORM_MAX_CONNECTIONS", "100") // Underscores → matches MaxConnections
+	os.Setenv("EXNORM_API_KEY", "secret-key")  // Underscores → matches APIKey
+	defer func() {
+		os.Unsetenv("EXNORM_MAX_CONNECTIONS")
+		os.Unsetenv("EXNORM_API_KEY")
+	}()
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXNORM_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("MaxConnections: %d\n", cfg.MaxConnections)
+	fmt.Printf("APIKey: %s\n", cfg.APIKey)
+
+	// Output:
+	// MaxConnections: 100
+	// APIKey: secret-key
+}
+
 // ExampleLoader_Watch demonstrates configuration watching.
 // Built-in sources (sourceenv, sourcefile) don't support watching yet.
 // Custom sources can implement Watch() to enable hot-reload.

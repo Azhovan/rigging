@@ -6,10 +6,13 @@ import (
 )
 
 // ToLowerDotPath normalizes a key to lowercase dot-separated path.
-// Double underscores (__) → dots, single underscores preserved.
-// Examples: FOO__BAR → foo.bar, DB_MAX → db_max
+// Double underscores (__) → dots, all other underscores stripped.
+// Examples: FOO__BAR → foo.bar, DB_MAX → dbmax, MAX_CONNECTIONS → maxconnections
 func ToLowerDotPath(key string) string {
+	// First convert double underscores to dots
 	normalized := strings.ReplaceAll(key, "__", ".")
+	// Then strip all remaining single underscores
+	normalized = strings.ReplaceAll(normalized, "_", "")
 	return strings.ToLower(normalized)
 }
 

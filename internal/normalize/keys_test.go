@@ -16,14 +16,14 @@ func TestToLowerDotPath(t *testing.T) {
 			expected: "foo.bar",
 		},
 		{
-			name:     "single underscore preserved",
+			name:     "single underscore stripped",
 			input:    "DB_MAX_CONNECTIONS",
-			expected: "db_max_connections",
+			expected: "dbmaxconnections",
 		},
 		{
 			name:     "mixed double and single underscores",
 			input:    "API__RATE_LIMIT",
-			expected: "api.rate_limit",
+			expected: "api.ratelimit",
 		},
 		{
 			name:     "multiple levels",
@@ -44,6 +44,16 @@ func TestToLowerDotPath(t *testing.T) {
 			name:     "only underscores",
 			input:    "____",
 			expected: "..",
+		},
+		{
+			name:     "max_connections should match maxconnections",
+			input:    "max_connections",
+			expected: "maxconnections",
+		},
+		{
+			name:     "MAX_CONNECTIONS should match maxconnections",
+			input:    "MAX_CONNECTIONS",
+			expected: "maxconnections",
 		},
 	}
 
