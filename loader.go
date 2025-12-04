@@ -51,7 +51,7 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 	// Step 1: Load from all sources and merge
 	mergedData := make(map[string]mergedEntry)
 
-	for i, source := range l.sources {
+	for _, source := range l.sources {
 		var data map[string]any
 		var originalKeys map[string]string
 		var err error
@@ -65,7 +65,7 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("load source %d: %w", i, err)
+			return nil, fmt.Errorf("load source %s: %w", source.Name(), err)
 		}
 
 		// Merge data into mergedData map
@@ -268,7 +268,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 	changeChannels := make([]<-chan ChangeEvent, 0, len(l.sources))
 	cancelFuncs := make([]context.CancelFunc, 0, len(l.sources))
 
-	for i, source := range l.sources {
+	for _, source := range l.sources {
 		// Create a child context for this source watcher
 		sourceCtx, cancel := context.WithCancel(ctx)
 		cancelFuncs = append(cancelFuncs, cancel)
@@ -283,7 +283,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 			}
 			// For other errors, send to error channel and skip
 			select {
-			case errorCh <- fmt.Errorf("watch source %d: %w", i, err):
+			case errorCh <- fmt.Errorf("watch source %s: %w", source.Name(), err):
 			case <-ctx.Done():
 				cancel()
 				return

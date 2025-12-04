@@ -327,3 +327,168 @@ func TestFileSource_ArraysPreserved(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, ports, 3)
 }
+
+func TestFlattenMapWithKeys_SimpleMap(t *testing.T) {
+	input := map[string]any{
+		"key1": "value1",
+		"key2": "value2",
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "value1", result["key1"])
+	assert.Equal(t, "value2", result["key2"])
+	assert.Equal(t, "key1", originalKeys["key1"])
+	assert.Equal(t, "key2", originalKeys["key2"])
+}
+
+func TestFlattenMapWithKeys_NestedMap(t *testing.T) {
+	input := map[string]any{
+		"database": map[string]any{
+			"host": "localhost",
+			"port": 5432,
+		},
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "localhost", result["database.host"])
+	assert.Equal(t, 5432, result["database.port"])
+	assert.Equal(t, "database.host", originalKeys["database.host"])
+	assert.Equal(t, "database.port", originalKeys["database.port"])
+}
+
+func TestFlattenMapWithKeys_DeepNesting(t *testing.T) {
+	input := map[string]any{
+		"level1": map[string]any{
+			"level2": map[string]any{
+				"level3": map[string]any{
+					"key": "deep-value",
+				},
+			},
+		},
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "deep-value", result["level1.level2.level3.key"])
+	assert.Equal(t, "level1.level2.level3.key", originalKeys["level1.level2.level3.key"])
+}
+
+func TestFlattenMapWithKeys_WithPrefix(t *testing.T) {
+	input := map[string]any{
+		"host": "localhost",
+		"port": 5432,
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("database", input, result, originalKeys)
+
+	assert.Equal(t, "localhost", result["database.host"])
+	assert.Equal(t, 5432, result["database.port"])
+	assert.Equal(t, "database.host", originalKeys["database.host"])
+	assert.Equal(t, "database.port", originalKeys["database.port"])
+}
+
+func TestFlattenMapWithKeys_MapAnyAny(t *testing.T) {
+	input := map[any]any{
+		"key1": "value1",
+		"key2": 123,
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "value1", result["key1"])
+	assert.Equal(t, 123, result["key2"])
+	assert.Equal(t, "key1", originalKeys["key1"])
+	assert.Equal(t, "key2", originalKeys["key2"])
+}
+
+func TestFlattenMapWithKeys_MapAnyAnyNested(t *testing.T) {
+	input := map[any]any{
+		"database": map[any]any{
+			"host": "localhost",
+			"port": 5432,
+		},
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "localhost", result["database.host"])
+	assert.Equal(t, 5432, result["database.port"])
+}
+
+func TestFlattenMapWithKeys_MapAnyAnyNonStringKey(t *testing.T) {
+	input := map[any]any{
+		"valid":   "value1",
+		123:       "ignored", // non-string key should be skipped
+		"another": "value2",
+	}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Equal(t, "value1", result["valid"])
+	assert.Equal(t, "value2", result["another"])
+	assert.NotContains(t, result, "123")
+}
+
+func TestFlattenMapWithKeys_MixedTypes(t *testing.T) {
+	input := map[string]any{
+		"string": "text",
+		"number": 42,
+		"bool":   true,
+		"float":  3.14,
+		"array":  []any{1, 2, 3},
+		"nested": map[string]any{
+			"key": "value",
+		},
+	}
+	prefix := "pref"
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys(prefix, input, result, originalKeys)
+
+	assert.Equal(t, "text", result["pref.string"])
+	assert.Equal(t, 42, result["pref.number"])
+	assert.Equal(t, true, result["pref.bool"])
+	assert.Equal(t, 3.14, result["pref.float"])
+	assert.Equal(t, []any{1, 2, 3}, result["pref.array"])
+	assert.Equal(t, "value", result["pref.nested.key"])
+}
+
+func TestFlattenMapWithKeys_EmptyMap(t *testing.T) {
+	input := map[string]any{}
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Empty(t, result)
+	assert.Empty(t, originalKeys)
+}
+
+func TestFlattenMapWithKeys_EmptyPrefix(t *testing.T) {
+	input := "value"
+	result := make(map[string]any)
+	originalKeys := make(map[string]string)
+
+	// When prefix is empty, the value should not be added
+	flattenMapWithKeys("", input, result, originalKeys)
+
+	assert.Empty(t, result)
+	assert.Empty(t, originalKeys)
+}
