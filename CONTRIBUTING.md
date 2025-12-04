@@ -35,6 +35,7 @@ make fmt
 ### Branch Naming
 - `fix/validation-panic` - Bug fixes
 - `feat/etcd-source` - New features
+- `refactor/improve-error-message` - Refactoring
 - `docs/clarify-tags` - Documentation
 - `perf/reduce-allocs` - Performance
 
