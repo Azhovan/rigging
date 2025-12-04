@@ -1,0 +1,22 @@
+name: Cleanup
+
+on:
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  delete-branch:
+    name: Delete Merged Branch
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+    - name: Delete branch
+      uses: dawidd6/action-delete-branch@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branches: ${{ github.event.pull_request.head.ref }}
