@@ -423,7 +423,7 @@ type mergedEntry struct {
 func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentPrefix string, parentFieldPath string) []FieldError {
 	var fieldErrors []FieldError
 
-	// Ensure target is a struct
+	// Ensure the target is a struct
 	if target.Kind() == reflect.Ptr {
 		target = target.Elem()
 	}
@@ -447,13 +447,13 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 		tag := field.Tag.Get("conf")
 		tagCfg := parseTag(tag)
 
-		// Determine field path for provenance (e.g., "Database.Host")
+		// Determine the field path for provenance (e.g., "Database.Host")
 		fieldPath := field.Name
 		if parentFieldPath != "" {
 			fieldPath = parentFieldPath + "." + field.Name
 		}
 
-		// Determine key path for lookup
+		// Determine the key path for lookup
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
 
 		// Handle nested structs with prefix
