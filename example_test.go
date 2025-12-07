@@ -493,21 +493,9 @@ func Example_underscoreNormalization() {
 
 // Example_prefixVsName demonstrates the difference between prefix and name tags.
 //
-// Key differences:
-// - prefix: Used on nested structs to add a prefix to ALL fields inside (e.g., "database.")
-// - name: Used on individual fields to specify an exact key name (overrides default naming)
-//
-// Without tags:
-//   - Field "Host" → looks for key "host"
-//   - Field "Database.Host" → looks for key "database.host"
-//
-// With prefix tag on struct:
-//   - Database struct with `conf:"prefix:db"` → all fields get "db." prefix
-//   - Field "Host" inside → looks for key "db.host"
-//
-// With name tag on field:
-//   - Field with `conf:"name:custom.key"` → looks for exact key "custom.key"
-//   - Ignores struct field name and parent prefix
+// - prefix: Adds a prefix to ALL nested fields (e.g., `conf:"prefix:database"` → "database.host", "database.port")
+// - name: Overrides the key for a single field (e.g., `conf:"name:db.user"` → looks for exact key "db.user")
+// - name tag takes precedence over prefix (ignores parent struct prefix)
 func Example_prefixVsName() {
 	type DatabaseConfig struct {
 		Host     string `conf:"required"`              // With prefix "database": looks for "database.host"

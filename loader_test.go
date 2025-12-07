@@ -1127,8 +1127,8 @@ func TestCollectValidKeys_NestedStruct(t *testing.T) {
 func TestCollectValidKeys_UnexportedFields(t *testing.T) {
 	type Config struct {
 		Host     string
-		port     int // unexported
-		internal string
+		port     int    // unexported
+		internal string // unexported
 	}
 
 	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
@@ -1424,8 +1424,8 @@ func TestCollectValidKeys_NameTakesPrecedenceOverPrefix(t *testing.T) {
 // TestCollectValidKeys_AllUnexportedFields verifies handling of struct with only unexported fields.
 func TestCollectValidKeys_AllUnexportedFields(t *testing.T) {
 	type Config struct {
-		host string
-		port int
+		host string // unexported
+		port int    // unexported
 	}
 
 	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")

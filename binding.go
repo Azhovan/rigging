@@ -32,10 +32,10 @@ func parseTag(tag string) tagConfig {
 		return cfg
 	}
 
-	// Parse directives manually to handle oneof values that contain commas
-	directives := splitDirectives(tag)
+	directives := extractTagDirectives(tag)
 
 	for _, directive := range directives {
+		// remove empty/invalid tags
 		directive = strings.TrimSpace(directive)
 		if directive == "" {
 			continue
@@ -44,6 +44,7 @@ func parseTag(tag string) tagConfig {
 		// Split by colon to separate directive name from value
 		parts := strings.SplitN(directive, ":", 2)
 		name := strings.TrimSpace(parts[0])
+
 		var value string
 		if len(parts) > 1 {
 			value = parts[1] // Don't trim value - empty strings may be intentional
@@ -64,16 +65,14 @@ func parseTag(tag string) tagConfig {
 		case "max":
 			cfg.max = value
 		case "oneof":
-			// oneof values are already part of this directive's value
 			if value != "" {
 				cfg.oneof = strings.Split(value, ",")
-				// Trim whitespace from each option
 				for i := range cfg.oneof {
 					cfg.oneof[i] = strings.TrimSpace(cfg.oneof[i])
 				}
 			}
 		case "required":
-			// Boolean directive: no value or explicit "true" means true
+			// No value or explicit "true" means true
 			if value == "" || value == "true" {
 				cfg.required = true
 			} else if value == "false" {
@@ -83,7 +82,7 @@ func parseTag(tag string) tagConfig {
 				cfg.required = true
 			}
 		case "secret":
-			// Boolean directive: no value or explicit "true" means true
+			// No value or explicit "true" means true
 			if value == "" || value == "true" {
 				cfg.secret = true
 			} else if value == "false" {
@@ -98,9 +97,10 @@ func parseTag(tag string) tagConfig {
 	return cfg
 }
 
-// splitDirectives splits a tag string into individual directives,
-// handling the special case where oneof values contain commas.
-func splitDirectives(tag string) []string {
+// extractTagDirectives extracts individual directives from a tag string.
+// It handles the special case where oneof values contain commas.
+// It doesn't validate the tags, validation happens in parseTag().
+func extractTagDirectives(tag string) []string {
 	var directives []string
 	var current strings.Builder
 	inOneof := false
@@ -550,7 +550,7 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 // Priority: name tag > prefix + derived > derived
 // All keys are normalized to lowercase for consistent matching.
 func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) string {
-	// If name tag is specified, use it directly (ignores prefix)
+	// If the name tag is specified, use it directly (ignores prefix)
 	if tagCfg.name != "" {
 		return strings.ToLower(tagCfg.name)
 	}

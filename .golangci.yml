@@ -48,8 +48,10 @@ issues:
     # Exclude test files from certain checks
     - path: _test\.go
       linters:
-        - errcheck
-        - gosec
+        - errcheck  # Tests often intentionally ignore errors
+        - gosec     # Security checks less critical in tests
+        - unused    # Test helpers and fixtures may appear unused
+        - unparam   # Test functions often have unused parameters
     # Exclude typecheck errors for import issues
     - linters:
         - typecheck

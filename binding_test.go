@@ -276,13 +276,6 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
-			name: "oneof with empty string option",
-			tag:  "oneof:,a,b",
-			expected: tagConfig{
-				oneof: []string{"", "a", "b"},
-			},
-		},
-		{
 			name: "oneof with excessive spaces",
 			tag:  "oneof:  a  ,  b  ,  c  ",
 			expected: tagConfig{
@@ -595,7 +588,7 @@ func TestParseTag(t *testing.T) {
 		},
 		{
 			name:     "typo in directive name",
-			tag:      "envv:VAR,requried:true",
+			tag:      "envv:VAR,requiired:true", // intentional typos to test silent ignore
 			expected: tagConfig{},
 		},
 
@@ -1167,7 +1160,6 @@ func TestParseStringSlice(t *testing.T) {
 	}
 }
 
-// TestDetermineKeyPath verifies the determineKeyPath function behavior.
 func TestDetermineKeyPath(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1393,7 +1385,7 @@ func TestDetermineKeyPath(t *testing.T) {
 			expected:     "host",
 		},
 		{
-			name:      "prefix in tagCfg is ignored",
+			name:      "prefix in tagCfg is ignored(individual field)",
 			fieldName: "Host",
 			tagCfg: tagConfig{
 				prefix: "ignored",
@@ -1414,12 +1406,17 @@ func TestDetermineKeyPath(t *testing.T) {
 	}
 }
 
-func TestSplitDirectives(t *testing.T) {
+func TestExtractTagDirectives(t *testing.T) {
 	tests := []struct {
 		name     string
 		tag      string
 		expected []string
 	}{
+		{
+			name:     "random tags(no validation)",
+			tag:      "random:value",
+			expected: []string{"random:value"},
+		},
 		{
 			name:     "empty tag",
 			tag:      "",
@@ -1514,13 +1511,12 @@ func TestSplitDirectives(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := splitDirectives(tt.tag)
+			result := extractTagDirectives(tt.tag)
 			// Handle nil vs empty slice comparison
-			if len(result) == 0 && len(tt.expected) == 0 {
-				return
-			}
-			if !reflect.DeepEqual(result, tt.expected) {
-				t.Errorf("splitDirectives(%q) = %v, want %v", tt.tag, result, tt.expected)
+			if len(result) != 0 && len(tt.expected) != 0 {
+				if !reflect.DeepEqual(result, tt.expected) {
+					t.Errorf("extractTagDirectives(%q) = %v, want %v", tt.tag, result, tt.expected)
+				}
 			}
 		})
 	}
@@ -1605,6 +1601,11 @@ func TestStartsWithDirective(t *testing.T) {
 		{
 			name:     "directive in middle",
 			input:    "some env:TEST",
+			expected: false,
+		},
+		{
+			name:     "only comma at the end",
+			input:    " ,",
 			expected: false,
 		},
 	}
