@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestParseTag(t *testing.T) {
+func TestBinding_ParseTag(t *testing.T) {
 	tests := []struct {
 		name     string
 		tag      string
@@ -230,14 +230,14 @@ func TestParseTag(t *testing.T) {
 			name: "oneof directive",
 			tag:  "oneof:prod,staging,dev",
 			expected: tagConfig{
-				oneof: []string{"prod", "staging", "dev"},
+				oneof: []string{"dev", "prod", "staging"},
 			},
 		},
 		{
 			name: "oneof with spaces",
 			tag:  "oneof:prod, staging, dev",
 			expected: tagConfig{
-				oneof: []string{"prod", "staging", "dev"},
+				oneof: []string{"dev", "prod", "staging"},
 			},
 		},
 		{
@@ -245,6 +245,13 @@ func TestParseTag(t *testing.T) {
 			tag:  "oneof:prod",
 			expected: tagConfig{
 				oneof: []string{"prod"},
+			},
+		},
+		{
+			name: "oneof with duplicated values",
+			tag:  "oneof:dev,prod,staging,dev,prod",
+			expected: tagConfig{
+				oneof: []string{"dev", "prod", "staging"},
 			},
 		},
 		{
@@ -258,21 +265,21 @@ func TestParseTag(t *testing.T) {
 			name: "oneof with only commas",
 			tag:  "oneof:,,,",
 			expected: tagConfig{
-				oneof: []string{"", "", "", ""},
+				oneof: nil,
 			},
 		},
 		{
 			name: "oneof with trailing comma",
 			tag:  "oneof:a,b,c,",
 			expected: tagConfig{
-				oneof: []string{"a", "b", "c", ""},
+				oneof: []string{"a", "b", "c"},
 			},
 		},
 		{
 			name: "oneof with leading comma",
 			tag:  "oneof:,a,b,c",
 			expected: tagConfig{
-				oneof: []string{"", "a", "b", "c"},
+				oneof: []string{"a", "b", "c"},
 			},
 		},
 		{
@@ -286,7 +293,7 @@ func TestParseTag(t *testing.T) {
 			name: "oneof with special characters",
 			tag:  "oneof:prod-1,staging_2,dev.3",
 			expected: tagConfig{
-				oneof: []string{"prod-1", "staging_2", "dev.3"},
+				oneof: []string{"dev.3", "prod-1", "staging_2"},
 			},
 		},
 		{
@@ -325,7 +332,7 @@ func TestParseTag(t *testing.T) {
 			name: "oneof at end of tag",
 			tag:  "required,secret,oneof:foo,bar,baz",
 			expected: tagConfig{
-				oneof:    []string{"foo", "bar", "baz"},
+				oneof:    []string{"bar", "baz", "foo"},
 				required: true,
 				secret:   true,
 			},
@@ -652,7 +659,7 @@ func TestParseTag(t *testing.T) {
 	}
 }
 
-func TestConvertValue(t *testing.T) {
+func TestBinding_ConvertValue(t *testing.T) {
 	tests := []struct {
 		name        string
 		rawValue    any
@@ -962,7 +969,7 @@ func TestConvertValue(t *testing.T) {
 	}
 }
 
-func TestConvertValue_Optional(t *testing.T) {
+func TestBinding_ConvertValue_Optional(t *testing.T) {
 	// Test Optional[int]
 	t.Run("string to Optional[int]", func(t *testing.T) {
 		targetType := reflect.TypeOf(Optional[int]{})
@@ -1049,7 +1056,7 @@ func TestConvertValue_Optional(t *testing.T) {
 	})
 }
 
-func TestParseBool(t *testing.T) {
+func TestBinding_ParseBool(t *testing.T) {
 	tests := []struct {
 		input   string
 		want    bool
@@ -1096,7 +1103,7 @@ func TestParseBool(t *testing.T) {
 	}
 }
 
-func TestParseStringSlice(t *testing.T) {
+func TestBinding_ParseStringSlice(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   any
@@ -1160,7 +1167,7 @@ func TestParseStringSlice(t *testing.T) {
 	}
 }
 
-func TestDetermineKeyPath(t *testing.T) {
+func TestBinding_DetermineKeyPath(t *testing.T) {
 	tests := []struct {
 		name         string
 		fieldName    string
@@ -1406,7 +1413,7 @@ func TestDetermineKeyPath(t *testing.T) {
 	}
 }
 
-func TestExtractTagDirectives(t *testing.T) {
+func TestBinding_ExtractTagDirectives(t *testing.T) {
 	tests := []struct {
 		name     string
 		tag      string
@@ -1522,7 +1529,7 @@ func TestExtractTagDirectives(t *testing.T) {
 	}
 }
 
-func TestStartsWithDirective(t *testing.T) {
+func TestBinding_StartsWithDirective(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string

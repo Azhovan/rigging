@@ -3,6 +3,7 @@ package rigging
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,11 +66,22 @@ func parseTag(tag string) tagConfig {
 		case "max":
 			cfg.max = value
 		case "oneof":
+			// Empty or duplicated values are ignored.
+			// The final result is sorted.
 			if value != "" {
-				cfg.oneof = strings.Split(value, ",")
-				for i := range cfg.oneof {
-					cfg.oneof[i] = strings.TrimSpace(cfg.oneof[i])
+				parts := strings.Split(value, ",")
+				seen := make(map[string]bool)
+				for _, v := range parts {
+					trimmed := strings.TrimSpace(v)
+					if trimmed == "" || seen[trimmed] {
+						continue
+					}
+
+					cfg.oneof = append(cfg.oneof, trimmed)
+					seen[trimmed] = true
 				}
+
+				sort.Strings(cfg.oneof)
 			}
 		case "required":
 			// No value or explicit "true" means true
