@@ -13,6 +13,7 @@ Stop debugging configuration errors in production. Rigging gives you compile-tim
 type Config struct {
     Database struct {
         Host     string `conf:"required"`
+        Port     int    `conf:"default:5432,min:1024,max:65535"`
         Password string `conf:"required,secret"`
     } `conf:"prefix:database"`
 }
@@ -21,9 +22,9 @@ cfg, err := rigging.NewLoader[Config]().
     WithSource(sourcefile.New("config.yaml", sourcefile.Options{})).
     WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"})).
     Load(ctx)
-// Type-safe: cfg.Database.Host is a string, not interface{}
-// Observable: Know exactly where each value came from
-// Policy-driven: Validation rules enforced at load time
+// Type-safe: cfg.Database.Port is an int, guaranteed by compiler
+// Observable: Track where Database.Host came from (file vs env)
+// Policy-driven: Port validated to be within 1024-65535 range
 ```
 
 ## Why Rigging?
@@ -94,6 +95,20 @@ cfg, err := loader.Load(ctx)
 // If we reach here, all validation passed
 ```
 
+## Comparison with Other Libraries
+
+| Feature | Rigging | Viper | envconfig |
+|---------|---------|-------|-----------|
+| Type safety | Compile-time | Runtime | Compile-time |
+| Multi-source | Explicit order | Implicit | Env only |
+| Provenance | Full tracking | No | No |
+| Validation | Tags + custom | Manual | Tags only |
+| Secret redaction | Automatic | Manual | Manual |
+| Global state | None | Singleton | None |
+| Watch/reload | Custom sources | Built-in | No |
+
+\* Rigging provides the `Watch()` API for custom configuration sources. Built-in file and environment sources don't support watching yet.
+
 ## Installation
 
 ```bash
@@ -111,13 +126,24 @@ go get github.com/Azhovan/rigging/sourceenv
 
 ### Basic Usage
 
+Create `config.yaml`:
+```yaml
+database:
+  host: localhost
+```
+
+Set the required password:
+```bash
+export APP_DATABASE__PASSWORD=secret
+```
+
 ```go
 package main
 
 import (
     "context"
     "log"
-    
+
     "github.com/Azhovan/rigging"
     "github.com/Azhovan/rigging/sourcefile"
     "github.com/Azhovan/rigging/sourceenv"
@@ -128,7 +154,7 @@ type Config struct {
         Port int    `conf:"default:8080"`
         Host string `conf:"default:0.0.0.0"`
     } `conf:"prefix:server"`
-    
+
     Database struct {
         Host     string `conf:"required"`
         Port     int    `conf:"default:5432"`
@@ -140,12 +166,12 @@ func main() {
     loader := rigging.NewLoader[Config]().
         WithSource(sourcefile.New("config.yaml", sourcefile.Options{})).
         WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"}))
-    
+
     cfg, err := loader.Load(context.Background())
     if err != nil {
         log.Fatal(err)
     }
-    
+
     // Use your configuration
     log.Printf("Starting server on %s:%d", cfg.Server.Host, cfg.Server.Port)
 }
@@ -178,7 +204,7 @@ Custom validation:
 
 ```go
 loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
-    if cfg.Environment == "prod" && cfg.Database.Host == "localhost" {
+    if cfg.Environment == "prod" && cfg.Server.Host == "localhost" {
         return errors.New("production cannot use localhost")
     }
     return nil
@@ -190,7 +216,10 @@ loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg
 Track configuration sources:
 
 ```go
-cfg, _ := loader.Load(ctx)
+cfg, err := loader.Load(ctx)
+if err != nil {
+    log.Fatal(err)
+}
 
 prov, _ := rigging.GetProvenance(cfg)
 for _, field := range prov.Fields {
@@ -201,6 +230,8 @@ for _, field := range prov.Fields {
 Dump configuration safely:
 
 ```go
+import "os"
+
 // Secrets are automatically redacted
 rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
 
@@ -242,19 +273,19 @@ Control binding and validation with struct tags:
 type Config struct {
     // Required field
     ApiKey string `conf:"required"`
-    
+
     // Default value
     Port int `conf:"default:8080"`
-    
+
     // Validation constraints
     MaxConns int `conf:"min:1,max:100"`
-    
+
     // Allowed values
     Environment string `conf:"oneof:prod,staging,dev"`
-    
+
     // Secret (auto-redacted)
     Password string `conf:"secret"`
-    
+
     // Nested with prefix
     Database DatabaseConfig `conf:"prefix:database"`
 }
@@ -283,20 +314,6 @@ Common pattern:
 3. **Custom validators**: Your business rules
 
 All errors are collected and returned together.
-
-## Comparison with Other Libraries
-
-| Feature | Rigging | Viper | envconfig |
-|---------|---------|-------|-----------|
-| Type safety | Compile-time | Runtime | Compile-time |
-| Multi-source | Explicit order | Implicit | Env only |
-| Provenance | Full tracking | No | No |
-| Validation | Tags + custom | Manual | Tags only |
-| Secret redaction | Automatic | Manual | Manual |
-| Global state | None | Singleton | None |
-| Watch/reload | API ready* | Built-in | No |
-
-\* `loader.Watch()` is implemented. Built-in sources return `ErrWatchNotSupported`. Implement `Source.Watch()` in custom sources to enable hot-reload.
 
 ## Configuration Sources
 
@@ -436,31 +453,6 @@ func (s *MySource) Watch(ctx context.Context) (<-chan rigging.ChangeEvent, error
 }
 ```
 
-## Strict Mode
-
-Catch typos and deprecated keys:
-
-```go
-loader.Strict(true)  // Fail on unknown keys (default)
-loader.Strict(false) // Ignore unknown keys
-```
-
-## Error Handling
-
-All validation errors include field paths and codes:
-
-```go
-cfg, err := loader.Load(ctx)
-if err != nil {
-    if valErr, ok := err.(*rigging.ValidationError); ok {
-        for _, fe := range valErr.FieldErrors {
-            log.Printf("%s: %s (code: %s)", 
-                fe.FieldPath, fe.Message, fe.Code)
-        }
-    }
-}
-```
-
 ## Configuration Patterns
 
 ### Organize with Nested Structs
@@ -540,6 +532,12 @@ for _, field := range prov.Fields {
     }
 }
 ```
+
+## Examples
+
+See the [examples](examples/) directory for complete working examples:
+
+- [Basic Example](examples/basic/) - Complete tutorial with all features
 
 ## API Reference
 
@@ -758,16 +756,30 @@ type ChangeEvent struct {
 }
 ```
 
-## Examples
+## Strict Mode
 
-See the [examples](examples/) directory for complete working examples:
+Catch typos and deprecated keys:
 
-- [Basic Example](examples/basic/) - Complete tutorial with all features
+```go
+loader.Strict(true)  // Fail on unknown keys (default)
+loader.Strict(false) // Ignore unknown keys
+```
 
-## Documentation
+## Error Handling
 
-- [API Reference](https://pkg.go.dev/github.com/Azhovan/rigging)
-- [Contributing Guide](CONTRIBUTING.md)
+All validation errors include field paths and codes:
+
+```go
+cfg, err := loader.Load(ctx)
+if err != nil {
+    if valErr, ok := err.(*rigging.ValidationError); ok {
+        for _, fe := range valErr.FieldErrors {
+            log.Printf("%s: %s (code: %s)",
+                fe.FieldPath, fe.Message, fe.Code)
+        }
+    }
+}
+```
 
 ## FAQ
 
@@ -783,8 +795,13 @@ A: Mark fields with `secret` tag and load from environment variables. Secrets ar
 **Q: Does Rigging support hot-reload?**  
 A: The `loader.Watch()` API is implemented and ready to use. However, built-in sources (sourcefile, sourceenv) don't emit change events yet. You can implement custom sources with watch support, or wait for file watching (planned via fsnotify).
 
-**Q: Is this production-ready?**  
+**Q: Is this production-ready?**
 A: Rigging is designed for production use with comprehensive error handling, validation, and observability. The API is currently v0.x - expect minor breaking changes as we incorporate feedback from early adopters.
+
+## Documentation
+
+- [API Reference](https://pkg.go.dev/github.com/Azhovan/rigging)
+- [Contributing Guide](CONTRIBUTING.md)
 
 ## License
 
