@@ -159,7 +159,7 @@ Configure binding and validation with the `conf` tag:
 | `default:X` | Default value if not provided | `conf:"default:8080"` |
 | `min:N` | Minimum value (numeric) or length (string) | `conf:"min:1024"` |
 | `max:N` | Maximum value (numeric) or length (string) | `conf:"max:65535"` |
-| `oneof:a,b,c` | Value must be one of the options | `conf:"oneof:prod,staging,dev"` |
+| `oneof:a,b,c` | Value must be one of the options (duplicates removed, empty values ignored) | `conf:"oneof:prod,staging,dev"` |
 | `secret` | Mark field for redaction | `conf:"secret"` |
 | `prefix:path` | Prefix for nested struct fields | `conf:"prefix:database"` |
 | `name:path` | Override derived key path | `conf:"name:custom.path"` |

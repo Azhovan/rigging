@@ -17,7 +17,7 @@ type Config struct {
     // Validation constraints
     MaxConns int `conf:"min:1,max:100"`
 
-    // Allowed values
+    // Allowed values (duplicates removed, empty values ignored)
     Environment string `conf:"oneof:prod,staging,dev"`
 
     // Secret (auto-redacted)
