@@ -491,6 +491,81 @@ func Example_underscoreNormalization() {
 	// APIKey: secret-key
 }
 
+// Example_prefixVsName demonstrates the difference between prefix and name tags.
+//
+// Key differences:
+// - prefix: Used on nested structs to add a prefix to ALL fields inside (e.g., "database.")
+// - name: Used on individual fields to specify an exact key name (overrides default naming)
+//
+// Without tags:
+//   - Field "Host" → looks for key "host"
+//   - Field "Database.Host" → looks for key "database.host"
+//
+// With prefix tag on struct:
+//   - Database struct with `conf:"prefix:db"` → all fields get "db." prefix
+//   - Field "Host" inside → looks for key "db.host"
+//
+// With name tag on field:
+//   - Field with `conf:"name:custom.key"` → looks for exact key "custom.key"
+//   - Ignores struct field name and parent prefix
+func Example_prefixVsName() {
+	type DatabaseConfig struct {
+		Host     string `conf:"required"`              // With prefix "database": looks for "database.host"
+		Port     int    `conf:"default:5432"`          // With prefix "database": looks for "database.port"
+		Username string `conf:"name:db.user,required"` // name tag: looks for exact key "db.user" (ignores prefix!)
+	}
+
+	type ServerConfig struct {
+		Host string `conf:"required"`     // With prefix "server": looks for "server.host"
+		Port int    `conf:"default:8080"` // With prefix "server": looks for "server.port"
+	}
+
+	type Config struct {
+		AppName  string         `conf:"name:app.name,default:myapp"` // Looks for "app.name" (not "appname")
+		Server   ServerConfig   `conf:"prefix:server"`               // Adds "server." prefix to nested fields
+		Database DatabaseConfig `conf:"prefix:database"`             // Adds "database." prefix to nested fields
+	}
+
+	// Set environment variables
+	os.Setenv("EXPVN_APP__NAME", "testapp")       // Matches app.name (__ becomes .)
+	os.Setenv("EXPVN_SERVER__HOST", "localhost")  // Matches Server.Host (with prefix)
+	os.Setenv("EXPVN_SERVER__PORT", "9000")       // Matches Server.Port (with prefix)
+	os.Setenv("EXPVN_DATABASE__HOST", "db.local") // Matches Database.Host (with prefix)
+	os.Setenv("EXPVN_DATABASE__PORT", "3306")     // Matches Database.Port (with prefix)
+	os.Setenv("EXPVN_DB__USER", "admin")          // Matches Database.Username (name tag ignores prefix)
+	defer func() {
+		os.Unsetenv("EXPVN_APP__NAME")
+		os.Unsetenv("EXPVN_SERVER__HOST")
+		os.Unsetenv("EXPVN_SERVER__PORT")
+		os.Unsetenv("EXPVN_DATABASE__HOST")
+		os.Unsetenv("EXPVN_DATABASE__PORT")
+		os.Unsetenv("EXPVN_DB__USER")
+	}()
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXPVN_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("AppName: %s\n", cfg.AppName)
+	fmt.Printf("Server.Host: %s\n", cfg.Server.Host)
+	fmt.Printf("Server.Port: %d\n", cfg.Server.Port)
+	fmt.Printf("Database.Host: %s\n", cfg.Database.Host)
+	fmt.Printf("Database.Port: %d\n", cfg.Database.Port)
+	fmt.Printf("Database.Username: %s\n", cfg.Database.Username)
+
+	// Output:
+	// AppName: testapp
+	// Server.Host: localhost
+	// Server.Port: 9000
+	// Database.Host: db.local
+	// Database.Port: 3306
+	// Database.Username: admin
+}
+
 // ExampleLoader_Watch demonstrates configuration watching.
 // Built-in sources (sourceenv, sourcefile) don't support watching yet.
 // Custom sources can implement Watch() to enable hot-reload.
