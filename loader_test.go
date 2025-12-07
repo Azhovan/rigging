@@ -3,6 +3,7 @@ package rigging
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1052,5 +1053,590 @@ func TestWatch_MultipleSources(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for reload snapshot")
+	}
+}
+
+func TestCollectValidKeys_SimpleStruct(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	expectedKeys := []string{"host", "port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d", len(expectedKeys), len(validKeys))
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_WithPrefix verifies that collectValidKeys applies prefix to keys.
+func TestCollectValidKeys_WithPrefix(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "app")
+
+	expectedKeys := []string{"app.host", "app.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d", len(expectedKeys), len(validKeys))
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_NestedStruct verifies that collectValidKeys handles nested structs.
+func TestCollectValidKeys_NestedStruct(t *testing.T) {
+	type Database struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		Database Database `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Should have the database field itself plus nested keys
+	expectedKeys := []string{"database", "db.host", "db.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_UnexportedFields verifies that collectValidKeys skips unexported fields.
+func TestCollectValidKeys_UnexportedFields(t *testing.T) {
+	type Config struct {
+		Host     string
+		port     int    // unexported
+		internal string // unexported
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	if len(validKeys) != 1 {
+		t.Fatalf("expected 1 key, got %d: %v", len(validKeys), validKeys)
+	}
+
+	if !validKeys["host"] {
+		t.Error("expected key 'host' to be valid")
+	}
+
+	if validKeys["port"] {
+		t.Error("unexported field 'port' should not be valid")
+	}
+
+	if validKeys["internal"] {
+		t.Error("unexported field 'internal' should not be valid")
+	}
+}
+
+// TestCollectValidKeys_PointerType verifies that collectValidKeys handles pointer types.
+func TestCollectValidKeys_PointerType(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	// Pass pointer type
+	validKeys := collectValidKeys(reflect.TypeOf(&Config{}), "")
+
+	expectedKeys := []string{"host", "port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d", len(expectedKeys), len(validKeys))
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_NonStructType verifies that collectValidKeys returns empty map for non-struct types.
+func TestCollectValidKeys_NonStructType(t *testing.T) {
+	// Test with int
+	validKeys := collectValidKeys(reflect.TypeOf(42), "")
+	if len(validKeys) != 0 {
+		t.Errorf("expected 0 keys for int type, got %d", len(validKeys))
+	}
+
+	// Test with string
+	validKeys = collectValidKeys(reflect.TypeOf("test"), "")
+	if len(validKeys) != 0 {
+		t.Errorf("expected 0 keys for string type, got %d", len(validKeys))
+	}
+
+	// Test with slice
+	validKeys = collectValidKeys(reflect.TypeOf([]int{}), "")
+	if len(validKeys) != 0 {
+		t.Errorf("expected 0 keys for slice type, got %d", len(validKeys))
+	}
+}
+
+// TestCollectValidKeys_CustomName verifies that collectValidKeys respects name tag.
+func TestCollectValidKeys_CustomName(t *testing.T) {
+	type Config struct {
+		Host string `conf:"name:hostname"`
+		Port int    `conf:"name:port_number"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	expectedKeys := []string{"hostname", "port_number"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+
+	// Original field names should not be valid
+	if validKeys["host"] {
+		t.Error("original field name 'host' should not be valid when custom name is used")
+	}
+	if validKeys["port"] {
+		t.Error("original field name 'port' should not be valid when custom name is used")
+	}
+}
+
+// TestCollectValidKeys_TimeTypes verifies that collectValidKeys handles time.Time and time.Duration.
+func TestCollectValidKeys_TimeTypes(t *testing.T) {
+	type Config struct {
+		Timestamp time.Time
+		Timeout   time.Duration
+		Name      string
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// All three should be valid keys (time types are treated as primitives)
+	expectedKeys := []string{"timestamp", "timeout", "name"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_DeeplyNestedStruct verifies that collectValidKeys handles deeply nested structs.
+func TestCollectValidKeys_DeeplyNestedStruct(t *testing.T) {
+	type Credentials struct {
+		Username string
+		Password string
+	}
+
+	type Database struct {
+		Host        string
+		Port        int
+		Credentials Credentials `conf:"prefix:creds"`
+	}
+
+	type Config struct {
+		Database Database `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	expectedKeys := []string{
+		"database",
+		"db.host",
+		"db.port",
+		"db.credentials",
+		"creds.username",
+		"creds.password",
+	}
+
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_OptionalType verifies that collectValidKeys handles Optional[T] types.
+func TestCollectValidKeys_OptionalType(t *testing.T) {
+	type Database struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		Database Optional[Database] `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Should have the database field itself plus nested keys from Optional[Database]
+	// Note: For Optional types, the prefix tag is ignored and keyPath is used instead
+	expectedKeys := []string{"database", "database.host", "database.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_PointerFields verifies that collectValidKeys handles pointer fields within structs.
+func TestCollectValidKeys_PointerFields(t *testing.T) {
+	type Database struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		Name     string
+		Timeout  *int
+		Database *Database `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Current implementation: pointer fields to structs are treated as leaf values (not recursed)
+	// This documents the actual behavior - pointer fields are not dereferenced
+	expectedKeys := []string{"name", "timeout", "database"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+
+	// Pointer to struct fields are NOT recursed into (unlike non-pointer struct fields)
+	if validKeys["db.host"] || validKeys["db.port"] {
+		t.Error("pointer to struct fields should not be recursed into")
+	}
+}
+
+// TestCollectValidKeys_SliceAndMapFields verifies that collectValidKeys treats slices and maps as leaf values.
+func TestCollectValidKeys_SliceAndMapFields(t *testing.T) {
+	type Config struct {
+		Hosts    []string
+		Tags     []int
+		Metadata map[string]string
+		Ports    []int
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Slices and maps should be treated as leaf values (not recursed into)
+	expectedKeys := []string{"hosts", "tags", "metadata", "ports"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_EmptyStructTag verifies that empty struct tag behaves like no tag.
+func TestCollectValidKeys_EmptyStructTag(t *testing.T) {
+	type Config struct {
+		Host string `conf:""`
+		Port int
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	expectedKeys := []string{"host", "port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_NameTakesPrecedenceOverPrefix verifies that name tag overrides prefix.
+func TestCollectValidKeys_NameTakesPrecedenceOverPrefix(t *testing.T) {
+	type Database struct {
+		Host string `conf:"name:db_host"`
+		Port int
+	}
+
+	type Config struct {
+		Database Database `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// The name tag should take precedence, so we get "db_host" not "db.host"
+	expectedKeys := []string{"database", "db_host", "db.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+
+	// Should not have the prefixed version
+	if validKeys["db.host"] {
+		t.Error("should not have 'db.host' when name tag is specified")
+	}
+}
+
+// TestCollectValidKeys_AllUnexportedFields verifies handling of struct with only unexported fields.
+func TestCollectValidKeys_AllUnexportedFields(t *testing.T) {
+	type Config struct {
+		host string // unexported
+		port int    // unexported
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	if len(validKeys) != 0 {
+		t.Fatalf("expected 0 keys for struct with only unexported fields, got %d: %v", len(validKeys), validKeys)
+	}
+}
+
+// TestCollectValidKeys_EmptyStruct verifies handling of empty struct.
+func TestCollectValidKeys_EmptyStruct(t *testing.T) {
+	type Config struct{}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	if len(validKeys) != 0 {
+		t.Fatalf("expected 0 keys for empty struct, got %d: %v", len(validKeys), validKeys)
+	}
+}
+
+// TestCollectValidKeys_PrefixWithDots verifies that prefixes containing dots are handled correctly.
+func TestCollectValidKeys_PrefixWithDots(t *testing.T) {
+	type Server struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		Server Server `conf:"prefix:app.server"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Prefix with dots should be preserved
+	expectedKeys := []string{"server", "app.server.host", "app.server.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_CaseSensitivity verifies that field names are normalized to lowercase.
+func TestCollectValidKeys_CaseSensitivity(t *testing.T) {
+	type Config struct {
+		HTTPPort int
+		APIKey   string
+		DBHost   string
+		UserName string
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// All keys should be lowercase
+	expectedKeys := []string{"httpport", "apikey", "dbhost", "username"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+
+	// Should not have mixed-case versions
+	invalidKeys := []string{"HTTPPort", "APIKey", "DBHost", "UserName"}
+	for _, key := range invalidKeys {
+		if validKeys[key] {
+			t.Errorf("should not have mixed-case key %q", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_NestedOptionalTypes verifies handling of nested Optional types.
+func TestCollectValidKeys_NestedOptionalTypes(t *testing.T) {
+	type Credentials struct {
+		Username string
+		Password string
+	}
+
+	type Database struct {
+		Host        string
+		Credentials Optional[Credentials] `conf:"prefix:creds"`
+	}
+
+	type Config struct {
+		Database Optional[Database] `conf:"prefix:db"`
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Optional types should be unwrapped and recursed
+	expectedKeys := []string{
+		"database",
+		"database.host",
+		"database.credentials",
+		"database.credentials.username",
+		"database.credentials.password",
+	}
+
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_MixedFieldTypes verifies handling of struct with various field types.
+func TestCollectValidKeys_MixedFieldTypes(t *testing.T) {
+	type Nested struct {
+		Value string
+	}
+
+	type Config struct {
+		StringField   string
+		IntField      int
+		BoolField     bool
+		FloatField    float64
+		SliceField    []string
+		MapField      map[string]int
+		PointerField  *string
+		StructField   Nested `conf:"prefix:nested"`
+		TimeField     time.Time
+		DurationField time.Duration
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	expectedKeys := []string{
+		"stringfield",
+		"intfield",
+		"boolfield",
+		"floatfield",
+		"slicefield",
+		"mapfield",
+		"pointerfield",
+		"structfield",
+		"nested.value",
+		"timefield",
+		"durationfield",
+	}
+
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+}
+
+// TestCollectValidKeys_PrefixOnNonStructField verifies that prefix on non-struct fields is ignored.
+func TestCollectValidKeys_PrefixOnNonStructField(t *testing.T) {
+	type Config struct {
+		Host string `conf:"prefix:server"` // prefix should be ignored for non-struct
+		Port int    `conf:"prefix:server"` // prefix should be ignored for non-struct
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Prefix should be ignored for non-struct fields
+	expectedKeys := []string{"host", "port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
+	}
+
+	// Should not have prefixed versions
+	if validKeys["server.host"] || validKeys["server.port"] {
+		t.Error("prefix should be ignored for non-struct fields")
+	}
+}
+
+// TestCollectValidKeys_NestedStructWithoutPrefix verifies nested struct without prefix tag.
+func TestCollectValidKeys_NestedStructWithoutPrefix(t *testing.T) {
+	type Database struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		Database Database // no prefix tag
+	}
+
+	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
+
+	// Without prefix tag, nested keys should use parent field name as prefix
+	expectedKeys := []string{"database", "database.host", "database.port"}
+	if len(validKeys) != len(expectedKeys) {
+		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
+	}
+
+	for _, key := range expectedKeys {
+		if !validKeys[key] {
+			t.Errorf("expected key %q to be valid", key)
+		}
 	}
 }

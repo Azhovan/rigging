@@ -13,6 +13,7 @@ func TestParseTag(t *testing.T) {
 		tag      string
 		expected tagConfig
 	}{
+		// Basic directives
 		{
 			name:     "empty tag",
 			tag:      "",
@@ -26,10 +27,24 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
+			name: "env with underscores",
+			tag:  "env:DB__HOST__NAME",
+			expected: tagConfig{
+				env: "DB__HOST__NAME",
+			},
+		},
+		{
 			name: "name directive",
 			tag:  "name:custom.path",
 			expected: tagConfig{
 				name: "custom.path",
+			},
+		},
+		{
+			name: "name with dots",
+			tag:  "name:database.connection.host",
+			expected: tagConfig{
+				name: "database.connection.host",
 			},
 		},
 		{
@@ -39,6 +54,8 @@ func TestParseTag(t *testing.T) {
 				prefix: "database",
 			},
 		},
+
+		// Default directive
 		{
 			name: "default directive",
 			tag:  "default:5432",
@@ -48,13 +65,79 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
-			name: "default directive with empty value",
+			name: "default with empty value",
 			tag:  "default:",
 			expected: tagConfig{
 				defValue:   "",
 				hasDefault: true,
 			},
 		},
+		{
+			name: "default with colon",
+			tag:  "default:http://localhost:8080",
+			expected: tagConfig{
+				defValue:   "http://localhost:8080",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with URL",
+			tag:  "default:https://example.com:8080/path?query=value",
+			expected: tagConfig{
+				defValue:   "https://example.com:8080/path?query=value",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with JSON-like value",
+			tag:  "default:{\"key\":\"value\"}",
+			expected: tagConfig{
+				defValue:   "{\"key\":\"value\"}",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with special characters",
+			tag:  "default:!@#$%^&*()",
+			expected: tagConfig{
+				defValue:   "!@#$%^&*()",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with spaces",
+			tag:  "default:  value with spaces  ",
+			expected: tagConfig{
+				defValue:   "  value with spaces",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with comma terminates directive",
+			tag:  "default:a,b,c",
+			expected: tagConfig{
+				defValue:   "a",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with negative number",
+			tag:  "default:-123",
+			expected: tagConfig{
+				defValue:   "-123",
+				hasDefault: true,
+			},
+		},
+		{
+			name: "default with float",
+			tag:  "default:3.14159",
+			expected: tagConfig{
+				defValue:   "3.14159",
+				hasDefault: true,
+			},
+		},
+
+		// Min/Max directives
 		{
 			name: "min directive",
 			tag:  "min:1024",
@@ -70,6 +153,80 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
+			name: "min and max constraints",
+			tag:  "min:10,max:100",
+			expected: tagConfig{
+				min: "10",
+				max: "100",
+			},
+		},
+		{
+			name: "min with negative value",
+			tag:  "min:-100",
+			expected: tagConfig{
+				min: "-100",
+			},
+		},
+		{
+			name: "max with negative value",
+			tag:  "max:-10",
+			expected: tagConfig{
+				max: "-10",
+			},
+		},
+		{
+			name: "min with float",
+			tag:  "min:3.14",
+			expected: tagConfig{
+				min: "3.14",
+			},
+		},
+		{
+			name: "max with float",
+			tag:  "max:99.99",
+			expected: tagConfig{
+				max: "99.99",
+			},
+		},
+		{
+			name: "min with zero",
+			tag:  "min:0",
+			expected: tagConfig{
+				min: "0",
+			},
+		},
+		{
+			name: "max with zero",
+			tag:  "max:0",
+			expected: tagConfig{
+				max: "0",
+			},
+		},
+		{
+			name: "min and max with same value",
+			tag:  "min:10,max:10",
+			expected: tagConfig{
+				min: "10",
+				max: "10",
+			},
+		},
+		{
+			name: "min empty value",
+			tag:  "min:",
+			expected: tagConfig{
+				min: "",
+			},
+		},
+		{
+			name: "max empty value",
+			tag:  "max:",
+			expected: tagConfig{
+				max: "",
+			},
+		},
+
+		// Oneof directive
+		{
 			name: "oneof directive",
 			tag:  "oneof:prod,staging,dev",
 			expected: tagConfig{
@@ -77,93 +234,10 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
-			name: "oneof directive with spaces",
+			name: "oneof with spaces",
 			tag:  "oneof:prod, staging, dev",
 			expected: tagConfig{
 				oneof: []string{"prod", "staging", "dev"},
-			},
-		},
-		{
-			name: "required directive without value",
-			tag:  "required",
-			expected: tagConfig{
-				required: true,
-			},
-		},
-		{
-			name: "required directive with true",
-			tag:  "required:true",
-			expected: tagConfig{
-				required: true,
-			},
-		},
-		{
-			name: "required directive with false",
-			tag:  "required:false",
-			expected: tagConfig{
-				required: false,
-			},
-		},
-		{
-			name: "secret directive without value",
-			tag:  "secret",
-			expected: tagConfig{
-				secret: true,
-			},
-		},
-		{
-			name: "secret directive with true",
-			tag:  "secret:true",
-			expected: tagConfig{
-				secret: true,
-			},
-		},
-		{
-			name: "secret directive with false",
-			tag:  "secret:false",
-			expected: tagConfig{
-				secret: false,
-			},
-		},
-		{
-			name: "multiple directives",
-			tag:  "env:DB_HOST,required,default:localhost",
-			expected: tagConfig{
-				env:        "DB_HOST",
-				defValue:   "localhost",
-				hasDefault: true,
-				required:   true,
-			},
-		},
-		{
-			name: "complex tag with all directives",
-			tag:  "env:DB_PORT,name:database.port,default:5432,required,min:1024,max:65535,secret",
-			expected: tagConfig{
-				env:        "DB_PORT",
-				name:       "database.port",
-				defValue:   "5432",
-				hasDefault: true,
-				min:        "1024",
-				max:        "65535",
-				required:   true,
-				secret:     true,
-			},
-		},
-		{
-			name: "tag with spaces around commas",
-			tag:  "env:VAR, required, default:value",
-			expected: tagConfig{
-				env:        "VAR",
-				defValue:   "value",
-				hasDefault: true,
-				required:   true,
-			},
-		},
-		{
-			name: "prefix with nested struct",
-			tag:  "prefix:database",
-			expected: tagConfig{
-				prefix: "database",
 			},
 		},
 		{
@@ -174,59 +248,61 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
-			name: "min and max constraints",
-			tag:  "min:10,max:100",
+			name: "oneof with empty value",
+			tag:  "oneof:",
 			expected: tagConfig{
-				min: "10",
-				max: "100",
+				oneof: nil,
 			},
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseTag(tt.tag)
-
-			if result.env != tt.expected.env {
-				t.Errorf("env: got %q, want %q", result.env, tt.expected.env)
-			}
-			if result.name != tt.expected.name {
-				t.Errorf("name: got %q, want %q", result.name, tt.expected.name)
-			}
-			if result.prefix != tt.expected.prefix {
-				t.Errorf("prefix: got %q, want %q", result.prefix, tt.expected.prefix)
-			}
-			if result.defValue != tt.expected.defValue {
-				t.Errorf("defValue: got %q, want %q", result.defValue, tt.expected.defValue)
-			}
-			if result.hasDefault != tt.expected.hasDefault {
-				t.Errorf("hasDefault: got %v, want %v", result.hasDefault, tt.expected.hasDefault)
-			}
-			if result.min != tt.expected.min {
-				t.Errorf("min: got %q, want %q", result.min, tt.expected.min)
-			}
-			if result.max != tt.expected.max {
-				t.Errorf("max: got %q, want %q", result.max, tt.expected.max)
-			}
-			if !reflect.DeepEqual(result.oneof, tt.expected.oneof) {
-				t.Errorf("oneof: got %v, want %v", result.oneof, tt.expected.oneof)
-			}
-			if result.required != tt.expected.required {
-				t.Errorf("required: got %v, want %v", result.required, tt.expected.required)
-			}
-			if result.secret != tt.expected.secret {
-				t.Errorf("secret: got %v, want %v", result.secret, tt.expected.secret)
-			}
-		})
-	}
-}
-
-func TestParseTagEdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		tag      string
-		expected tagConfig
-	}{
+		{
+			name: "oneof with only commas",
+			tag:  "oneof:,,,",
+			expected: tagConfig{
+				oneof: []string{"", "", "", ""},
+			},
+		},
+		{
+			name: "oneof with trailing comma",
+			tag:  "oneof:a,b,c,",
+			expected: tagConfig{
+				oneof: []string{"a", "b", "c", ""},
+			},
+		},
+		{
+			name: "oneof with leading comma",
+			tag:  "oneof:,a,b,c",
+			expected: tagConfig{
+				oneof: []string{"", "a", "b", "c"},
+			},
+		},
+		{
+			name: "oneof with excessive spaces",
+			tag:  "oneof:  a  ,  b  ,  c  ",
+			expected: tagConfig{
+				oneof: []string{"a", "b", "c"},
+			},
+		},
+		{
+			name: "oneof with special characters",
+			tag:  "oneof:prod-1,staging_2,dev.3",
+			expected: tagConfig{
+				oneof: []string{"prod-1", "staging_2", "dev.3"},
+			},
+		},
+		{
+			name: "oneof with numbers",
+			tag:  "oneof:1,2,3,4,5",
+			expected: tagConfig{
+				oneof: []string{"1", "2", "3", "4", "5"},
+			},
+		},
+		{
+			name: "oneof with URLs",
+			tag:  "oneof:http://localhost:8080,https://example.com:443",
+			expected: tagConfig{
+				oneof: []string{"http://localhost:8080", "https://example.com:443"},
+			},
+		},
 		{
 			name: "oneof followed by other directives",
 			tag:  "oneof:a,b,c,required,secret",
@@ -254,12 +330,100 @@ func TestParseTagEdgeCases(t *testing.T) {
 				secret:   true,
 			},
 		},
+
+		// Boolean directives (required/secret)
 		{
-			name: "default with colon",
-			tag:  "default:http://localhost:8080",
+			name: "required without value",
+			tag:  "required",
 			expected: tagConfig{
-				defValue:   "http://localhost:8080",
-				hasDefault: true,
+				required: true,
+			},
+		},
+		{
+			name: "required with true",
+			tag:  "required:true",
+			expected: tagConfig{
+				required: true,
+			},
+		},
+		{
+			name: "required with false",
+			tag:  "required:false",
+			expected: tagConfig{
+				required: false,
+			},
+		},
+		{
+			name: "required with invalid value defaults to true",
+			tag:  "required:invalid",
+			expected: tagConfig{
+				required: true,
+			},
+		},
+		{
+			name: "required with numeric value defaults to true",
+			tag:  "required:1",
+			expected: tagConfig{
+				required: true,
+			},
+		},
+		{
+			name: "secret without value",
+			tag:  "secret",
+			expected: tagConfig{
+				secret: true,
+			},
+		},
+		{
+			name: "secret with true",
+			tag:  "secret:true",
+			expected: tagConfig{
+				secret: true,
+			},
+		},
+		{
+			name: "secret with false",
+			tag:  "secret:false",
+			expected: tagConfig{
+				secret: false,
+			},
+		},
+		{
+			name: "secret with invalid value defaults to true",
+			tag:  "secret:invalid",
+			expected: tagConfig{
+				secret: true,
+			},
+		},
+		{
+			name: "secret with yes defaults to true",
+			tag:  "secret:yes",
+			expected: tagConfig{
+				secret: true,
+			},
+		},
+		{
+			name: "both required and secret false",
+			tag:  "required:false,secret:false",
+			expected: tagConfig{
+				required: false,
+				secret:   false,
+			},
+		},
+		{
+			name: "required true and secret false",
+			tag:  "required:true,secret:false",
+			expected: tagConfig{
+				required: true,
+				secret:   false,
+			},
+		},
+		{
+			name: "required false and secret true",
+			tag:  "required:false,secret:true",
+			expected: tagConfig{
+				required: false,
+				secret:   true,
 			},
 		},
 		{
@@ -270,25 +434,30 @@ func TestParseTagEdgeCases(t *testing.T) {
 				secret:   true,
 			},
 		},
+
+		// Multiple directives
 		{
-			name: "env with underscores",
-			tag:  "env:DB__HOST__NAME",
+			name: "multiple directives",
+			tag:  "env:DB_HOST,required,default:localhost",
 			expected: tagConfig{
-				env: "DB__HOST__NAME",
+				env:        "DB_HOST",
+				defValue:   "localhost",
+				hasDefault: true,
+				required:   true,
 			},
 		},
 		{
-			name: "name with dots",
-			tag:  "name:database.connection.host",
+			name: "complex tag with all directives",
+			tag:  "env:DB_PORT,name:database.port,default:5432,required,min:1024,max:65535,secret",
 			expected: tagConfig{
-				name: "database.connection.host",
-			},
-		},
-		{
-			name: "oneof with empty string option",
-			tag:  "oneof:,a,b",
-			expected: tagConfig{
-				oneof: []string{"", "a", "b"},
+				env:        "DB_PORT",
+				name:       "database.port",
+				defValue:   "5432",
+				hasDefault: true,
+				min:        "1024",
+				max:        "65535",
+				required:   true,
+				secret:     true,
 			},
 		},
 		{
@@ -304,6 +473,143 @@ func TestParseTagEdgeCases(t *testing.T) {
 				max:        "65535",
 				oneof:      []string{"8080", "8443", "9000"},
 				required:   true,
+			},
+		},
+		{
+			name: "all directives with edge case values",
+			tag:  "env:DB__HOST,name:db.host,prefix:database,default:localhost:5432,min:-1,max:65535,oneof:localhost:5432,remote:5432,required:false,secret:true",
+			expected: tagConfig{
+				env:        "DB__HOST",
+				name:       "db.host",
+				prefix:     "database",
+				defValue:   "localhost:5432",
+				hasDefault: true,
+				min:        "-1",
+				max:        "65535",
+				oneof:      []string{"localhost:5432", "remote:5432"},
+				required:   false,
+				secret:     true,
+			},
+		},
+		{
+			name: "oneof with URLs and other directives",
+			tag:  "oneof:http://localhost:8080,https://prod.com:443,required,default:http://localhost:8080",
+			expected: tagConfig{
+				oneof:      []string{"http://localhost:8080", "https://prod.com:443"},
+				required:   true,
+				defValue:   "http://localhost:8080",
+				hasDefault: true,
+			},
+		},
+
+		// Whitespace handling
+		{
+			name: "tag with spaces around commas",
+			tag:  "env:VAR, required, default:value",
+			expected: tagConfig{
+				env:        "VAR",
+				defValue:   "value",
+				hasDefault: true,
+				required:   true,
+			},
+		},
+		{
+			name: "spaces around directive names",
+			tag:  " env : VAR , required , secret ",
+			expected: tagConfig{
+				env:      " VAR",
+				required: true,
+				secret:   true,
+			},
+		},
+		{
+			name: "tabs and spaces",
+			tag:  "env:VAR\t,\trequired\t,\tsecret",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+				secret:   true,
+			},
+		},
+		{
+			name: "multiple spaces between directives",
+			tag:  "env:VAR  ,  required  ,  secret",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+				secret:   true,
+			},
+		},
+		{
+			name: "empty directives from multiple commas",
+			tag:  "env:VAR,,required",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+			},
+		},
+		{
+			name: "trailing comma",
+			tag:  "env:VAR,required,",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+			},
+		},
+		{
+			name: "leading comma",
+			tag:  ",env:VAR,required",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+			},
+		},
+
+		// Unknown directives
+		{
+			name: "unknown directive ignored",
+			tag:  "unknown:value,env:VAR",
+			expected: tagConfig{
+				env: "VAR",
+			},
+		},
+		{
+			name: "multiple unknown directives",
+			tag:  "foo:bar,env:VAR,baz:qux,required",
+			expected: tagConfig{
+				env:      "VAR",
+				required: true,
+			},
+		},
+		{
+			name:     "only unknown directives",
+			tag:      "unknown:value,another:thing",
+			expected: tagConfig{},
+		},
+		{
+			name:     "typo in directive name",
+			tag:      "envv:VAR,requiired:true", // intentional typos to test silent ignore
+			expected: tagConfig{},
+		},
+
+		// Edge cases
+		{
+			name: "duplicate directives - last one wins",
+			tag:  "env:VAR1,env:VAR2,required:false,required:true",
+			expected: tagConfig{
+				env:      "VAR2",
+				required: true,
+			},
+		},
+		{
+			name: "empty values for multiple directives",
+			tag:  "env:,name:,prefix:,default:",
+			expected: tagConfig{
+				env:        "",
+				name:       "",
+				prefix:     "",
+				defValue:   "",
+				hasDefault: true,
 			},
 		},
 	}
@@ -849,6 +1155,466 @@ func TestParseStringSlice(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("parseStringSlice() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetermineKeyPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		fieldName    string
+		tagCfg       tagConfig
+		parentPrefix string
+		expected     string
+	}{
+		// Basic behavior - no prefix, no name tag
+		{
+			name:         "simple field name without prefix",
+			fieldName:    "Host",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "host",
+		},
+		{
+			name:         "single letter field name",
+			fieldName:    "X",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "x",
+		},
+		{
+			name:         "field with underscores",
+			fieldName:    "Max_Connections",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "max_connections",
+		},
+		{
+			name:         "field with numbers",
+			fieldName:    "Port8080",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "port8080",
+		},
+		{
+			name:         "very long field name",
+			fieldName:    "VeryLongFieldNameThatShouldStillWork",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "verylongfieldnamethatshouldstillwork",
+		},
+
+		// With parent prefix
+		{
+			name:         "field name with parent prefix",
+			fieldName:    "Host",
+			tagCfg:       tagConfig{},
+			parentPrefix: "database",
+			expected:     "database.host",
+		},
+		{
+			name:         "single letter with prefix",
+			fieldName:    "Y",
+			tagCfg:       tagConfig{},
+			parentPrefix: "coord",
+			expected:     "coord.y",
+		},
+		{
+			name:         "parent prefix with dots",
+			fieldName:    "Host",
+			tagCfg:       tagConfig{},
+			parentPrefix: "app.server.db",
+			expected:     "app.server.db.host",
+		},
+		{
+			name:         "very long prefix",
+			fieldName:    "Host",
+			tagCfg:       tagConfig{},
+			parentPrefix: "application.configuration.database.primary",
+			expected:     "application.configuration.database.primary.host",
+		},
+
+		// Name tag behavior (takes precedence)
+		{
+			name:      "name tag takes precedence over parent prefix",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "custom_host",
+			},
+			parentPrefix: "database",
+			expected:     "custom_host",
+		},
+		{
+			name:      "name tag ignores parent prefix",
+			fieldName: "Port",
+			tagCfg: tagConfig{
+				name: "server_port",
+			},
+			parentPrefix: "config",
+			expected:     "server_port",
+		},
+		{
+			name:      "name tag with dots",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "db.primary.host",
+			},
+			parentPrefix: "",
+			expected:     "db.primary.host",
+		},
+		{
+			name:      "name tag with special characters",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "host-name_v2",
+			},
+			parentPrefix: "",
+			expected:     "host-name_v2",
+		},
+		{
+			name:      "name tag with spaces",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "host name",
+			},
+			parentPrefix: "",
+			expected:     "host name",
+		},
+		{
+			name:      "name tag with prefix tag and parent prefix",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name:   "override",
+				prefix: "ignored_prefix",
+			},
+			parentPrefix: "ignored_parent",
+			expected:     "override",
+		},
+		{
+			name:      "name tag with all other tags",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name:       "custom_key",
+				prefix:     "ignored",
+				env:        "ENV_VAR",
+				defValue:   "default",
+				hasDefault: true,
+			},
+			parentPrefix: "parent",
+			expected:     "custom_key",
+		},
+
+		// Case normalization
+		{
+			name:         "mixed case field name normalized to lowercase",
+			fieldName:    "HTTPPort",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "httpport",
+		},
+		{
+			name:         "all caps field name",
+			fieldName:    "URL",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "url",
+		},
+		{
+			name:         "mixed case field with prefix",
+			fieldName:    "APIKey",
+			tagCfg:       tagConfig{},
+			parentPrefix: "auth",
+			expected:     "auth.apikey",
+		},
+		{
+			name:         "all caps with prefix",
+			fieldName:    "API",
+			tagCfg:       tagConfig{},
+			parentPrefix: "server",
+			expected:     "server.api",
+		},
+		{
+			name:         "mixed case parent prefix normalized",
+			fieldName:    "Host",
+			tagCfg:       tagConfig{},
+			parentPrefix: "Database",
+			expected:     "database.host",
+		},
+		{
+			name:      "mixed case name tag normalized",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "CustomHost",
+			},
+			parentPrefix: "",
+			expected:     "customhost",
+		},
+		{
+			name:      "name tag with uppercase and dots",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "DB.Primary.HOST",
+			},
+			parentPrefix: "",
+			expected:     "db.primary.host",
+		},
+
+		// Edge cases
+		{
+			name:         "empty field name",
+			fieldName:    "",
+			tagCfg:       tagConfig{},
+			parentPrefix: "",
+			expected:     "",
+		},
+		{
+			name:         "empty field name with prefix",
+			fieldName:    "",
+			tagCfg:       tagConfig{},
+			parentPrefix: "database",
+			expected:     "database.",
+		},
+		{
+			name:      "empty name tag falls back to derived",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "",
+			},
+			parentPrefix: "",
+			expected:     "host",
+		},
+		{
+			name:      "prefix in tagCfg is ignored(individual field)",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				prefix: "ignored",
+			},
+			parentPrefix: "database",
+			expected:     "database.host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := determineKeyPath(tt.fieldName, tt.tagCfg, tt.parentPrefix)
+			if result != tt.expected {
+				t.Errorf("determineKeyPath(%q, tagCfg, %q) = %q, want %q",
+					tt.fieldName, tt.parentPrefix, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractTagDirectives(t *testing.T) {
+	tests := []struct {
+		name     string
+		tag      string
+		expected []string
+	}{
+		{
+			name:     "random tags(no validation)",
+			tag:      "random:value",
+			expected: []string{"random:value"},
+		},
+		{
+			name:     "empty tag",
+			tag:      "",
+			expected: []string{},
+		},
+		{
+			name:     "single directive",
+			tag:      "env:DB_HOST",
+			expected: []string{"env:DB_HOST"},
+		},
+		{
+			name:     "multiple simple directives",
+			tag:      "env:DB_HOST,required",
+			expected: []string{"env:DB_HOST", "required"},
+		},
+		{
+			name:     "multiple directives with values",
+			tag:      "env:DB_HOST,default:localhost,required",
+			expected: []string{"env:DB_HOST", "default:localhost", "required"},
+		},
+		{
+			name:     "oneof with single value",
+			tag:      "oneof:dev",
+			expected: []string{"oneof:dev"},
+		},
+		{
+			name:     "oneof with multiple values",
+			tag:      "oneof:dev,staging,prod",
+			expected: []string{"oneof:dev,staging,prod"},
+		},
+		{
+			name:     "oneof with multiple values and other directives",
+			tag:      "env:ENV,oneof:dev,staging,prod,required",
+			expected: []string{"env:ENV", "oneof:dev,staging,prod", "required"},
+		},
+		{
+			name:     "oneof at the end",
+			tag:      "env:ENV,required,oneof:dev,staging,prod",
+			expected: []string{"env:ENV", "required", "oneof:dev,staging,prod"},
+		},
+		{
+			name:     "oneof in the middle",
+			tag:      "required,oneof:dev,staging,prod,default:dev",
+			expected: []string{"required", "oneof:dev,staging,prod", "default:dev"},
+		},
+		{
+			name:     "complex tag with all directive types",
+			tag:      "env:LOG_LEVEL,name:logging.level,oneof:debug,info,warn,error,default:info,required",
+			expected: []string{"env:LOG_LEVEL", "name:logging.level", "oneof:debug,info,warn,error", "default:info", "required"},
+		},
+		{
+			name:     "oneof with values containing special characters",
+			tag:      "oneof:us-east-1,us-west-2,eu-central-1",
+			expected: []string{"oneof:us-east-1,us-west-2,eu-central-1"},
+		},
+		{
+			name:     "multiple oneof directives",
+			tag:      "oneof:a,b,c,env:TEST,oneof:x,y,z",
+			expected: []string{"oneof:a,b,c", "env:TEST", "oneof:x,y,z"},
+		},
+		{
+			name:     "min and max directives",
+			tag:      "min:1,max:100,default:50",
+			expected: []string{"min:1", "max:100", "default:50"},
+		},
+		{
+			name:     "prefix directive",
+			tag:      "prefix:database,required",
+			expected: []string{"prefix:database", "required"},
+		},
+		{
+			name:     "secret directive",
+			tag:      "env:API_KEY,secret,required",
+			expected: []string{"env:API_KEY", "secret", "required"},
+		},
+		{
+			name:     "oneof with empty values",
+			tag:      "oneof:,,empty",
+			expected: []string{"oneof:,,empty"},
+		},
+		{
+			name:     "consecutive commas outside oneof",
+			tag:      "env:TEST,,required",
+			expected: []string{"env:TEST", "", "required"},
+		},
+		{
+			name:     "directive with no value",
+			tag:      "env:,required",
+			expected: []string{"env:", "required"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractTagDirectives(tt.tag)
+			// Handle nil vs empty slice comparison
+			if len(result) != 0 && len(tt.expected) != 0 {
+				if !reflect.DeepEqual(result, tt.expected) {
+					t.Errorf("extractTagDirectives(%q) = %v, want %v", tt.tag, result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestStartsWithDirective(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "env directive",
+			input:    "env:DB_HOST",
+			expected: true,
+		},
+		{
+			name:     "name directive",
+			input:    "name:custom.path",
+			expected: true,
+		},
+		{
+			name:     "prefix directive",
+			input:    "prefix:database",
+			expected: true,
+		},
+		{
+			name:     "default directive",
+			input:    "default:localhost",
+			expected: true,
+		},
+		{
+			name:     "min directive",
+			input:    "min:1",
+			expected: true,
+		},
+		{
+			name:     "max directive",
+			input:    "max:100",
+			expected: true,
+		},
+		{
+			name:     "oneof directive",
+			input:    "oneof:dev,staging,prod",
+			expected: true,
+		},
+		{
+			name:     "required directive",
+			input:    "required",
+			expected: true,
+		},
+		{
+			name:     "secret directive",
+			input:    "secret",
+			expected: true,
+		},
+		{
+			name:     "with leading whitespace",
+			input:    "  env:TEST",
+			expected: true,
+		},
+		{
+			name:     "with leading whitespace required",
+			input:    "  required",
+			expected: true,
+		},
+		{
+			name:     "not a directive",
+			input:    "random_text",
+			expected: false,
+		},
+		{
+			name:     "partial match",
+			input:    "environment:TEST",
+			expected: false,
+		},
+		{
+			name:     "directive in middle",
+			input:    "some env:TEST",
+			expected: false,
+		},
+		{
+			name:     "only comma at the end",
+			input:    " ,",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := startsWithDirective(tt.input)
+			if result != tt.expected {
+				t.Errorf("startsWithDirective(%q) = %v, want %v", tt.input, result, tt.expected)
 			}
 		})
 	}
