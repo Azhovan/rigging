@@ -288,7 +288,6 @@ func TestFlattenConfig_DeeplyNested(t *testing.T) {
 	}
 }
 
-
 func TestApplyExclusions_ExactPathMatching(t *testing.T) {
 	config := map[string]any{
 		"database.host":     "localhost",

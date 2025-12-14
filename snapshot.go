@@ -26,6 +26,9 @@ var (
 )
 
 // supportedVersions lists snapshot format versions that can be read.
+// Used by ReadSnapshot in Phase 5.
+//
+//nolint:unused // Will be used by ReadSnapshot implementation
 var supportedVersions = map[string]bool{
 	"1.0": true,
 }
