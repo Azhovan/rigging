@@ -128,6 +128,7 @@ go get github.com/Azhovan/rigging/sourceenv
 - **[Configuration Sources](docs/configuration-sources.md)** - Learn about environment variables, file sources, custom sources, and watch/reload
 - **[API Reference](docs/api-reference.md)** - Complete API documentation for all types, methods, and struct tags
 - **[Configuration Patterns](docs/patterns.md)** - Best practices and design patterns for organizing your configuration
+- **[Architecture Overview](docs/architecture.md)** - Understand Rigging's internals, core components, and data models
 - **[Examples](examples/)** - Complete working examples
 
 ## FAQ
