@@ -231,6 +231,21 @@ func applyExclusions(config map[string]any, exclude []string) map[string]any {
 	return result
 }
 
+// ExpandPath expands template variables using current time.
+// For consistency with snapshot metadata, prefer WriteSnapshot which
+// uses the snapshot's internal timestamp for expansion.
+func ExpandPath(template string) string {
+	return ExpandPathWithTime(template, time.Now())
+}
+
+// ExpandPathWithTime expands template variables using the provided timestamp.
+// Replaces all {{timestamp}} occurrences with the time formatted as 20060102-150405.
+// Returns the path unchanged if no template variables are present.
+func ExpandPathWithTime(template string, t time.Time) string {
+	timestamp := t.UTC().Format("20060102-150405")
+	return strings.ReplaceAll(template, "{{timestamp}}", timestamp)
+}
+
 // formatFlatValue formats a field value for the flattened config map.
 // Secrets are redacted, other values are returned in their natural types.
 func formatFlatValue(v reflect.Value, prov *FieldProvenance) any {

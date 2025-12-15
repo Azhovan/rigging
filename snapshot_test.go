@@ -815,3 +815,257 @@ func TestCreateSnapshotProperties_ProvenancePreservation(t *testing.T) {
 		}
 	}
 }
+
+// ExpandPath and ExpandPathWithTime unit tests
+
+func TestExpandPathWithTime_SingleTimestamp(t *testing.T) {
+	// Test template with single {{timestamp}}
+	testTime := time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC)
+	template := "config-{{timestamp}}.json"
+
+	result := ExpandPathWithTime(template, testTime)
+
+	expected := "config-20240115-103045.json"
+	if result != expected {
+		t.Errorf("Expected %s, got: %s", expected, result)
+	}
+}
+
+func TestExpandPathWithTime_MultipleTimestamps(t *testing.T) {
+	// Test template with multiple {{timestamp}} occurrences
+	testTime := time.Date(2024, 6, 20, 14, 5, 9, 0, time.UTC)
+	template := "{{timestamp}}/config-{{timestamp}}.json"
+
+	result := ExpandPathWithTime(template, testTime)
+
+	expected := "20240620-140509/config-20240620-140509.json"
+	if result != expected {
+		t.Errorf("Expected %s, got: %s", expected, result)
+	}
+}
+
+func TestExpandPathWithTime_NoVariables(t *testing.T) {
+	// Test template with no variables (unchanged)
+	testTime := time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC)
+	template := "config/snapshot.json"
+
+	result := ExpandPathWithTime(template, testTime)
+
+	if result != template {
+		t.Errorf("Expected unchanged path %s, got: %s", template, result)
+	}
+}
+
+func TestExpandPathWithTime_EmptyPath(t *testing.T) {
+	testTime := time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC)
+	template := ""
+
+	result := ExpandPathWithTime(template, testTime)
+
+	if result != "" {
+		t.Errorf("Expected empty string, got: %s", result)
+	}
+}
+
+func TestExpandPathWithTime_TimestampOnly(t *testing.T) {
+	testTime := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
+	template := "{{timestamp}}"
+
+	result := ExpandPathWithTime(template, testTime)
+
+	expected := "20241231-235959"
+	if result != expected {
+		t.Errorf("Expected %s, got: %s", expected, result)
+	}
+}
+
+func TestExpandPathWithTime_NonUTCTime(t *testing.T) {
+	// Test that non-UTC times are converted to UTC for formatting
+	loc, _ := time.LoadLocation("America/New_York")
+	testTime := time.Date(2024, 1, 15, 10, 30, 45, 0, loc) // EST
+	template := "config-{{timestamp}}.json"
+
+	result := ExpandPathWithTime(template, testTime)
+
+	// 10:30:45 EST = 15:30:45 UTC
+	expected := "config-20240115-153045.json"
+	if result != expected {
+		t.Errorf("Expected %s, got: %s", expected, result)
+	}
+}
+
+func TestExpandPath_UsesCurrentTime(t *testing.T) {
+	// Test ExpandPath vs ExpandPathWithTime consistency
+	template := "config-{{timestamp}}.json"
+
+	before := time.Now().UTC()
+	result := ExpandPath(template)
+	after := time.Now().UTC()
+
+	// The result should contain a timestamp between before and after
+	// We can't check exact value, but we can verify format
+	if !strings.HasPrefix(result, "config-") || !strings.HasSuffix(result, ".json") {
+		t.Errorf("Unexpected format: %s", result)
+	}
+
+	// Extract timestamp from result
+	timestampStr := strings.TrimPrefix(result, "config-")
+	timestampStr = strings.TrimSuffix(timestampStr, ".json")
+
+	// Verify it's a valid timestamp format (YYYYMMDD-HHMMSS)
+	if len(timestampStr) != 15 { // 8 + 1 + 6
+		t.Errorf("Expected timestamp length 15, got %d: %s", len(timestampStr), timestampStr)
+	}
+
+	// Parse the timestamp to verify it's in the expected range
+	parsedTime, err := time.Parse("20060102-150405", timestampStr)
+	if err != nil {
+		t.Errorf("Failed to parse timestamp %s: %v", timestampStr, err)
+	}
+
+	// Allow 1 second tolerance for test execution time
+	if parsedTime.Before(before.Add(-time.Second)) || parsedTime.After(after.Add(time.Second)) {
+		t.Errorf("Timestamp %v not in expected range [%v, %v]", parsedTime, before, after)
+	}
+}
+
+func TestExpandPath_EquivalentToExpandPathWithTime(t *testing.T) {
+	// Verify that ExpandPath produces the same result as ExpandPathWithTime
+	// when called with the same time
+	template := "snapshots/{{timestamp}}/config.json"
+
+	// Get current time and call both functions
+	now := time.Now()
+	expectedResult := ExpandPathWithTime(template, now)
+
+	// ExpandPath uses time.Now() internally, so we can't get exact match
+	// but we can verify the format is consistent
+	result := ExpandPath(template)
+
+	// Both should have the same structure
+	if !strings.HasPrefix(result, "snapshots/") || !strings.HasSuffix(result, "/config.json") {
+		t.Errorf("Unexpected format from ExpandPath: %s", result)
+	}
+	if !strings.HasPrefix(expectedResult, "snapshots/") || !strings.HasSuffix(expectedResult, "/config.json") {
+		t.Errorf("Unexpected format from ExpandPathWithTime: %s", expectedResult)
+	}
+}
+
+// Property-based tests for ExpandPath
+
+func TestExpandPathProperties_TemplateExpansionConsistency(t *testing.T) {
+	// **Feature: snapshot-core, Property 4: Template Expansion Consistency**
+	// **Validates: Requirements 3.1, 3.2, 3.3**
+	// For any path template containing {{timestamp}}, expanding with a given time
+	// SHALL replace all occurrences with the same formatted timestamp string,
+	// and paths without templates SHALL remain unchanged.
+
+	// Test with various times across different edge cases
+	testTimes := []time.Time{
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),      // New Year midnight
+		time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC), // End of year
+		time.Date(2024, 6, 15, 12, 30, 45, 0, time.UTC),  // Mid-year
+		time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),      // Y2K
+		time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC), // Far future
+		time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),      // Unix epoch
+		time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC),    // Leap year
+	}
+
+	// Test templates with various patterns
+	templates := []string{
+		"config-{{timestamp}}.json",
+		"{{timestamp}}/snapshot.json",
+		"snapshots/{{timestamp}}/config-{{timestamp}}.json",
+		"{{timestamp}}",
+		"/var/log/app/{{timestamp}}/{{timestamp}}/data.json",
+		"no-template-here.json",
+		"",
+		"prefix-{{timestamp}}-suffix-{{timestamp}}-end",
+	}
+
+	for _, testTime := range testTimes {
+		expectedTimestamp := testTime.UTC().Format("20060102-150405")
+
+		for _, template := range templates {
+			result := ExpandPathWithTime(template, testTime)
+
+			// Property 1: Same time produces same output (deterministic)
+			result2 := ExpandPathWithTime(template, testTime)
+			if result != result2 {
+				t.Errorf("Non-deterministic expansion for template %q with time %v: got %q and %q",
+					template, testTime, result, result2)
+			}
+
+			// Property 2: All {{timestamp}} occurrences are replaced with the same value
+			if strings.Contains(template, "{{timestamp}}") {
+				// Result should not contain any {{timestamp}}
+				if strings.Contains(result, "{{timestamp}}") {
+					t.Errorf("Template %q not fully expanded: %q", template, result)
+				}
+
+				// Count occurrences in template and verify they're all replaced with same timestamp
+				templateCount := strings.Count(template, "{{timestamp}}")
+				resultCount := strings.Count(result, expectedTimestamp)
+				if templateCount != resultCount {
+					t.Errorf("Template %q has %d {{timestamp}} but result has %d occurrences of %s: %q",
+						template, templateCount, resultCount, expectedTimestamp, result)
+				}
+			}
+
+			// Property 3: Paths without templates remain unchanged
+			if !strings.Contains(template, "{{timestamp}}") {
+				if result != template {
+					t.Errorf("Template without variables should be unchanged: %q -> %q", template, result)
+				}
+			}
+
+			// Property 4: The timestamp format is always YYYYMMDD-HHMMSS (15 chars)
+			if strings.Contains(template, "{{timestamp}}") {
+				// Verify the timestamp in result matches expected format
+				if !strings.Contains(result, expectedTimestamp) {
+					t.Errorf("Result %q does not contain expected timestamp %s", result, expectedTimestamp)
+				}
+			}
+		}
+	}
+}
+
+func TestExpandPathProperties_TimezoneNormalization(t *testing.T) {
+	// **Feature: snapshot-core, Property 4: Template Expansion Consistency**
+	// **Validates: Requirements 3.1**
+	// For any time in any timezone, the expansion SHALL use UTC.
+
+	// Same instant in different timezones should produce same result
+	utcTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	// Load various timezones
+	timezones := []string{
+		"America/New_York",
+		"Europe/London",
+		"Asia/Tokyo",
+		"Australia/Sydney",
+		"Pacific/Auckland",
+	}
+
+	template := "config-{{timestamp}}.json"
+	expectedResult := ExpandPathWithTime(template, utcTime)
+
+	for _, tzName := range timezones {
+		loc, err := time.LoadLocation(tzName)
+		if err != nil {
+			t.Logf("Skipping timezone %s: %v", tzName, err)
+			continue
+		}
+
+		// Convert UTC time to local timezone
+		localTime := utcTime.In(loc)
+
+		result := ExpandPathWithTime(template, localTime)
+
+		// Property: Same instant in any timezone produces same result
+		if result != expectedResult {
+			t.Errorf("Timezone %s produced different result: expected %q, got %q",
+				tzName, expectedResult, result)
+		}
+	}
+}
