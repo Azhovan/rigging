@@ -65,6 +65,44 @@ func WithExcludeFields(paths ...string) SnapshotOption {
 	}
 }
 
+// CreateSnapshot captures the current configuration state.
+// Returns a snapshot with flattened config, provenance, and metadata.
+// Secrets are automatically redacted using existing provenance data.
+// The snapshot's Timestamp is captured at creation time.
+func CreateSnapshot[T any](cfg *T, opts ...SnapshotOption) (*ConfigSnapshot, error) {
+	if cfg == nil {
+		return nil, ErrNilConfig
+	}
+
+	// Apply options
+	snapCfg := &snapshotConfig{}
+	for _, opt := range opts {
+		opt(snapCfg)
+	}
+
+	// Capture timestamp at creation time
+	timestamp := time.Now().UTC()
+
+	// Get provenance data
+	var provFields []FieldProvenance
+	if prov, ok := GetProvenance(cfg); ok && prov != nil {
+		provFields = prov.Fields
+	}
+
+	// Flatten config (handles secret redaction internally)
+	flatConfig := flattenConfig(cfg)
+
+	// Apply field exclusions
+	flatConfig = applyExclusions(flatConfig, snapCfg.excludeFields)
+
+	return &ConfigSnapshot{
+		Version:    SnapshotVersion,
+		Timestamp:  timestamp,
+		Config:     flatConfig,
+		Provenance: provFields,
+	}, nil
+}
+
 // flattenConfig walks a configuration struct and returns a flat map of key paths to values.
 // It handles nested structs, Optional[T] types, and time.Time.
 // Secret fields are redacted using provenance information.

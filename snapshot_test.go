@@ -1,6 +1,7 @@
 package rigging
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -432,5 +433,385 @@ func TestApplyExclusions_PreservesOriginalConfig(t *testing.T) {
 	}
 	if config["database.password"] != "secret" {
 		t.Errorf("Original config value should be preserved, got: %v", config["database.password"])
+	}
+}
+
+// CreateSnapshot unit tests
+
+func TestCreateSnapshot_NilConfig(t *testing.T) {
+	var cfg *struct{}
+
+	snapshot, err := CreateSnapshot(cfg)
+
+	if err != ErrNilConfig {
+		t.Errorf("Expected ErrNilConfig, got: %v", err)
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot, got: %v", snapshot)
+	}
+}
+
+func TestCreateSnapshot_WithoutProvenance(t *testing.T) {
+	type Config struct {
+		Host string `conf:"name:host"`
+		Port int    `conf:"name:port"`
+	}
+
+	cfg := &Config{
+		Host: "localhost",
+		Port: 8080,
+	}
+
+	// Don't store provenance - should still work
+
+	snapshot, err := CreateSnapshot(cfg)
+
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	if snapshot == nil {
+		t.Fatal("Expected snapshot, got nil")
+	}
+
+	// Check basic fields
+	if snapshot.Version != SnapshotVersion {
+		t.Errorf("Expected version=%s, got: %s", SnapshotVersion, snapshot.Version)
+	}
+	if snapshot.Timestamp.IsZero() {
+		t.Error("Expected non-zero timestamp")
+	}
+	if snapshot.Config["host"] != "localhost" {
+		t.Errorf("Expected host=localhost, got: %v", snapshot.Config["host"])
+	}
+}
+
+func TestCreateSnapshot_EmptyConfig(t *testing.T) {
+	type Config struct{}
+
+	cfg := &Config{}
+
+	snapshot, err := CreateSnapshot(cfg)
+
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	if snapshot == nil {
+		t.Fatal("Expected snapshot, got nil")
+	}
+
+	// Empty config should produce valid snapshot with empty config map
+	if snapshot.Version != SnapshotVersion {
+		t.Errorf("Expected version=%s, got: %s", SnapshotVersion, snapshot.Version)
+	}
+	if snapshot.Config == nil {
+		t.Error("Expected non-nil config map")
+	}
+}
+
+func TestCreateSnapshot_VersionAndTimestamp(t *testing.T) {
+	type Config struct {
+		Host string `conf:"name:host"`
+	}
+
+	cfg := &Config{Host: "localhost"}
+
+	before := time.Now().UTC()
+	snapshot, err := CreateSnapshot(cfg)
+	after := time.Now().UTC()
+
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Check version
+	if snapshot.Version != "1.0" {
+		t.Errorf("Expected version=1.0, got: %s", snapshot.Version)
+	}
+
+	// Check timestamp is within expected range
+	if snapshot.Timestamp.Before(before) || snapshot.Timestamp.After(after) {
+		t.Errorf("Timestamp %v not in expected range [%v, %v]", snapshot.Timestamp, before, after)
+	}
+
+	// Check timestamp is UTC
+	if snapshot.Timestamp.Location() != time.UTC {
+		t.Errorf("Expected UTC timestamp, got: %v", snapshot.Timestamp.Location())
+	}
+}
+
+func TestCreateSnapshot_WithProvenance(t *testing.T) {
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Password: "secret123",
+	}
+
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env:HOST", Secret: false},
+			{FieldPath: "Password", KeyPath: "password", SourceName: "env:PASSWORD", Secret: true},
+		},
+	}
+	storeProvenance(cfg, prov)
+	defer deleteProvenance(cfg)
+
+	snapshot, err := CreateSnapshot(cfg)
+
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Check provenance is included
+	if len(snapshot.Provenance) != 2 {
+		t.Errorf("Expected 2 provenance entries, got: %d", len(snapshot.Provenance))
+	}
+
+	// Check secrets are redacted in config
+	if snapshot.Config["password"] != "***redacted***" {
+		t.Errorf("Expected password to be redacted, got: %v", snapshot.Config["password"])
+	}
+
+	// Check non-secret is not redacted
+	if snapshot.Config["host"] != "localhost" {
+		t.Errorf("Expected host=localhost, got: %v", snapshot.Config["host"])
+	}
+}
+
+func TestCreateSnapshot_WithExclusions(t *testing.T) {
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     8080,
+		Password: "secret",
+	}
+
+	snapshot, err := CreateSnapshot(cfg, WithExcludeFields("password", "port"))
+
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Check excluded fields are not present
+	if _, exists := snapshot.Config["password"]; exists {
+		t.Error("Expected password to be excluded")
+	}
+	if _, exists := snapshot.Config["port"]; exists {
+		t.Error("Expected port to be excluded")
+	}
+
+	// Check non-excluded field is present
+	if snapshot.Config["host"] != "localhost" {
+		t.Errorf("Expected host=localhost, got: %v", snapshot.Config["host"])
+	}
+}
+
+// Property-based tests for CreateSnapshot
+
+func TestCreateSnapshotProperties_SecretRedaction(t *testing.T) {
+	// **Feature: snapshot-core, Property 2: Secret Redaction Completeness**
+	// **Validates: Requirements 1.5**
+	// For any configuration with fields marked as secret, the snapshot config
+	// SHALL contain "***redacted***" for all secret field paths.
+
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Password string `conf:"name:password,secret"`
+		APIKey   string `conf:"name:api_key,secret"`
+		Token    string `conf:"name:token,secret"`
+	}
+
+	// Test with various secret values
+	testCases := []struct {
+		password string
+		apiKey   string
+		token    string
+	}{
+		{"secret1", "key1", "tok1"},
+		{"", "", ""},
+		{"very-long-secret-value-that-should-still-be-redacted", "another-key", "another-token"},
+		{"special!@#$%^&*()", "key with spaces", "token\nwith\nnewlines"},
+	}
+
+	for _, tc := range testCases {
+		cfg := &Config{
+			Host:     "localhost",
+			Password: tc.password,
+			APIKey:   tc.apiKey,
+			Token:    tc.token,
+		}
+
+		prov := &Provenance{
+			Fields: []FieldProvenance{
+				{FieldPath: "Host", KeyPath: "host", SourceName: "env", Secret: false},
+				{FieldPath: "Password", KeyPath: "password", SourceName: "env", Secret: true},
+				{FieldPath: "APIKey", KeyPath: "api_key", SourceName: "env", Secret: true},
+				{FieldPath: "Token", KeyPath: "token", SourceName: "env", Secret: true},
+			},
+		}
+		storeProvenance(cfg, prov)
+
+		snapshot, err := CreateSnapshot(cfg)
+		deleteProvenance(cfg)
+
+		if err != nil {
+			t.Fatalf("CreateSnapshot failed: %v", err)
+		}
+
+		// Property: ALL secret fields must be redacted
+		secretFields := []string{"password", "api_key", "token"}
+		for _, field := range secretFields {
+			if snapshot.Config[field] != "***redacted***" {
+				t.Errorf("Secret field %s not redacted, got: %v", field, snapshot.Config[field])
+			}
+		}
+
+		// Property: Non-secret fields must NOT be redacted
+		if snapshot.Config["host"] != "localhost" {
+			t.Errorf("Non-secret field host should not be redacted, got: %v", snapshot.Config["host"])
+		}
+	}
+}
+
+func TestCreateSnapshotProperties_FieldExclusion(t *testing.T) {
+	// **Feature: snapshot-core, Property 3: Field Exclusion Correctness**
+	// **Validates: Requirements 4.1**
+	// For any configuration and exclusion list, the snapshot config
+	// SHALL NOT contain any field paths that match the exclusion list.
+
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password"`
+		APIKey   string `conf:"name:api_key"`
+		Debug    bool   `conf:"name:debug"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     8080,
+		Password: "secret",
+		APIKey:   "key123",
+		Debug:    true,
+	}
+
+	// Test various exclusion combinations
+	exclusionTests := []struct {
+		exclude  []string
+		expected map[string]bool // fields that should be present
+	}{
+		{
+			exclude:  []string{},
+			expected: map[string]bool{"host": true, "port": true, "password": true, "api_key": true, "debug": true},
+		},
+		{
+			exclude:  []string{"password"},
+			expected: map[string]bool{"host": true, "port": true, "api_key": true, "debug": true},
+		},
+		{
+			exclude:  []string{"password", "api_key"},
+			expected: map[string]bool{"host": true, "port": true, "debug": true},
+		},
+		{
+			exclude:  []string{"host", "port", "password", "api_key", "debug"},
+			expected: map[string]bool{},
+		},
+		{
+			exclude:  []string{"PASSWORD", "API_KEY"}, // case-insensitive
+			expected: map[string]bool{"host": true, "port": true, "debug": true},
+		},
+	}
+
+	for _, tc := range exclusionTests {
+		snapshot, err := CreateSnapshot(cfg, WithExcludeFields(tc.exclude...))
+		if err != nil {
+			t.Fatalf("CreateSnapshot failed: %v", err)
+		}
+
+		// Property: Excluded fields must NOT appear
+		for _, excluded := range tc.exclude {
+			normalizedKey := strings.ToLower(excluded)
+			if _, exists := snapshot.Config[normalizedKey]; exists {
+				t.Errorf("Excluded field %s should not appear in snapshot", excluded)
+			}
+		}
+
+		// Property: Non-excluded fields must appear
+		for field := range tc.expected {
+			if _, exists := snapshot.Config[field]; !exists {
+				t.Errorf("Non-excluded field %s should appear in snapshot", field)
+			}
+		}
+	}
+}
+
+func TestCreateSnapshotProperties_ProvenancePreservation(t *testing.T) {
+	// **Feature: snapshot-core, Property 6: Provenance Preservation**
+	// **Validates: Requirements 1.2**
+	// For any configuration with provenance data, the snapshot's Provenance field
+	// SHALL contain entries matching the provenance returned by GetProvenance.
+
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     8080,
+		Password: "secret",
+	}
+
+	originalProv := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env:HOST", Secret: false},
+			{FieldPath: "Port", KeyPath: "port", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Password", KeyPath: "password", SourceName: "env:PASSWORD", Secret: true},
+		},
+	}
+	storeProvenance(cfg, originalProv)
+	defer deleteProvenance(cfg)
+
+	snapshot, err := CreateSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Property: Provenance count must match
+	if len(snapshot.Provenance) != len(originalProv.Fields) {
+		t.Errorf("Expected %d provenance entries, got %d", len(originalProv.Fields), len(snapshot.Provenance))
+	}
+
+	// Property: Each provenance entry must be preserved
+	provMap := make(map[string]FieldProvenance)
+	for _, p := range snapshot.Provenance {
+		provMap[p.FieldPath] = p
+	}
+
+	for _, orig := range originalProv.Fields {
+		snapshotProv, exists := provMap[orig.FieldPath]
+		if !exists {
+			t.Errorf("Provenance for %s not found in snapshot", orig.FieldPath)
+			continue
+		}
+
+		if snapshotProv.KeyPath != orig.KeyPath {
+			t.Errorf("KeyPath mismatch for %s: expected %s, got %s", orig.FieldPath, orig.KeyPath, snapshotProv.KeyPath)
+		}
+		if snapshotProv.SourceName != orig.SourceName {
+			t.Errorf("SourceName mismatch for %s: expected %s, got %s", orig.FieldPath, orig.SourceName, snapshotProv.SourceName)
+		}
+		if snapshotProv.Secret != orig.Secret {
+			t.Errorf("Secret mismatch for %s: expected %v, got %v", orig.FieldPath, orig.Secret, snapshotProv.Secret)
+		}
 	}
 }
