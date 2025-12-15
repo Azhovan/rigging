@@ -436,7 +436,6 @@ func TestApplyExclusions_PreservesOriginalConfig(t *testing.T) {
 	}
 }
 
-
 // CreateSnapshot unit tests
 
 func TestCreateSnapshot_NilConfig(t *testing.T) {
@@ -614,7 +613,6 @@ func TestCreateSnapshot_WithExclusions(t *testing.T) {
 		t.Errorf("Expected host=localhost, got: %v", snapshot.Config["host"])
 	}
 }
-
 
 // Property-based tests for CreateSnapshot
 
