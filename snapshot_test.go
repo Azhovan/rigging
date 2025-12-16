@@ -1,6 +1,10 @@
 package rigging
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1067,5 +1071,496 @@ func TestExpandPathProperties_TimezoneNormalization(t *testing.T) {
 			t.Errorf("Timezone %s produced different result: expected %q, got %q",
 				tzName, expectedResult, result)
 		}
+	}
+}
+
+
+// generateTempFileName unit tests
+
+func TestGenerateTempFileName_UniqueNames(t *testing.T) {
+	targetPath := "/path/to/config.json"
+
+	// Generate multiple temp file names and verify they're unique
+	names := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		name, err := generateTempFileName(targetPath)
+		if err != nil {
+			t.Fatalf("generateTempFileName failed: %v", err)
+		}
+
+		if names[name] {
+			t.Errorf("Duplicate temp file name generated: %s", name)
+		}
+		names[name] = true
+	}
+}
+
+func TestGenerateTempFileName_SameDirectory(t *testing.T) {
+	testCases := []struct {
+		targetPath  string
+		expectedDir string
+	}{
+		{"/path/to/config.json", "/path/to/config.json.tmp."},
+		{"config.json", "config.json.tmp."},
+		{"/var/log/app/snapshot.json", "/var/log/app/snapshot.json.tmp."},
+		{"./relative/path/file.json", "./relative/path/file.json.tmp."},
+	}
+
+	for _, tc := range testCases {
+		name, err := generateTempFileName(tc.targetPath)
+		if err != nil {
+			t.Fatalf("generateTempFileName failed for %s: %v", tc.targetPath, err)
+		}
+
+		// Verify temp file starts with target path + ".tmp."
+		if !strings.HasPrefix(name, tc.expectedDir) {
+			t.Errorf("Expected temp file to start with %s, got: %s", tc.expectedDir, name)
+		}
+
+		// Verify there's a random suffix after ".tmp."
+		suffix := strings.TrimPrefix(name, tc.expectedDir)
+		if len(suffix) != 16 { // 8 bytes = 16 hex chars
+			t.Errorf("Expected 16-char hex suffix, got %d chars: %s", len(suffix), suffix)
+		}
+
+		// Verify suffix is valid hex
+		for _, c := range suffix {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				t.Errorf("Invalid hex character in suffix: %c", c)
+			}
+		}
+	}
+}
+
+func TestGenerateTempFileName_Format(t *testing.T) {
+	targetPath := "snapshot.json"
+
+	name, err := generateTempFileName(targetPath)
+	if err != nil {
+		t.Fatalf("generateTempFileName failed: %v", err)
+	}
+
+	// Format should be: targetPath + ".tmp." + 16hexchars
+	expectedPrefix := "snapshot.json.tmp."
+	if !strings.HasPrefix(name, expectedPrefix) {
+		t.Errorf("Expected prefix %s, got: %s", expectedPrefix, name)
+	}
+
+	// Total length: len(targetPath) + 5 (".tmp.") + 16 (hex)
+	expectedLen := len(targetPath) + 5 + 16
+	if len(name) != expectedLen {
+		t.Errorf("Expected length %d, got %d: %s", expectedLen, len(name), name)
+	}
+}
+
+
+// WriteSnapshot unit tests
+
+func TestWriteSnapshot_WritesValidSnapshot(t *testing.T) {
+	// Create a temp directory for test files
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
+		Config: map[string]any{
+			"host": "localhost",
+			"port": 8080,
+		},
+		Provenance: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env", Secret: false},
+		},
+	}
+
+	err := WriteSnapshot(snapshot, targetPath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		t.Fatal("Snapshot file was not created")
+	}
+
+	// Verify content is valid JSON
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to read snapshot file: %v", err)
+	}
+
+	var readSnapshot ConfigSnapshot
+	if err := json.Unmarshal(data, &readSnapshot); err != nil {
+		t.Fatalf("Failed to unmarshal snapshot: %v", err)
+	}
+
+	// Verify content matches
+	if readSnapshot.Version != snapshot.Version {
+		t.Errorf("Version mismatch: expected %s, got %s", snapshot.Version, readSnapshot.Version)
+	}
+	if !readSnapshot.Timestamp.Equal(snapshot.Timestamp) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", snapshot.Timestamp, readSnapshot.Timestamp)
+	}
+}
+
+func TestWriteSnapshot_CreatesParentDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create a path with nested directories that don't exist
+	targetPath := filepath.Join(tmpDir, "nested", "dirs", "snapshot.json")
+
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    map[string]any{"key": "value"},
+	}
+
+	err := WriteSnapshot(snapshot, targetPath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		t.Fatal("Snapshot file was not created")
+	}
+
+	// Verify parent directories were created
+	parentDir := filepath.Dir(targetPath)
+	info, err := os.Stat(parentDir)
+	if err != nil {
+		t.Fatalf("Parent directory not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("Parent path is not a directory")
+	}
+}
+
+func TestWriteSnapshot_SetsCorrectFilePermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    map[string]any{"key": "value"},
+	}
+
+	err := WriteSnapshot(snapshot, targetPath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Check file permissions
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to stat file: %v", err)
+	}
+
+	// File should have 0600 permissions (owner read/write only)
+	expectedPerm := os.FileMode(0600)
+	actualPerm := info.Mode().Perm()
+	if actualPerm != expectedPerm {
+		t.Errorf("Expected permissions %o, got %o", expectedPerm, actualPerm)
+	}
+}
+
+func TestWriteSnapshot_ExpandsTimestampTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+	templatePath := filepath.Join(tmpDir, "config-{{timestamp}}.json")
+
+	snapshotTime := time.Date(2024, 6, 15, 14, 30, 45, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: snapshotTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	err := WriteSnapshot(snapshot, templatePath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Verify file was created with expanded timestamp
+	expectedPath := filepath.Join(tmpDir, "config-20240615-143045.json")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s was not created", expectedPath)
+	}
+
+	// Verify template path file does NOT exist (it should be expanded)
+	if _, err := os.Stat(templatePath); !os.IsNotExist(err) {
+		t.Error("Template path should not exist as a file")
+	}
+}
+
+func TestWriteSnapshot_ReturnsErrSnapshotTooLarge(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	// Create a snapshot with a very large config that exceeds MaxSnapshotSize
+	// We'll create a config with many large string values
+	largeConfig := make(map[string]any)
+	// Each entry is about 1MB, we need > 100MB
+	largeValue := strings.Repeat("x", 1024*1024) // 1MB string
+	for i := 0; i < 110; i++ {
+		largeConfig[fmt.Sprintf("key%d", i)] = largeValue
+	}
+
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    largeConfig,
+	}
+
+	err := WriteSnapshot(snapshot, targetPath)
+	if err != ErrSnapshotTooLarge {
+		t.Errorf("Expected ErrSnapshotTooLarge, got: %v", err)
+	}
+
+	// Verify no file was created
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Error("File should not be created for oversized snapshot")
+	}
+}
+
+func TestWriteSnapshot_NilSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	err := WriteSnapshot(nil, targetPath)
+	if err != ErrNilConfig {
+		t.Errorf("Expected ErrNilConfig, got: %v", err)
+	}
+}
+
+func TestWriteSnapshot_TempFileCleanupOnError(t *testing.T) {
+	// This test verifies that temp files are cleaned up when an error occurs
+	// We'll test by trying to write to a read-only directory (after creating it)
+	tmpDir := t.TempDir()
+
+	// Create a subdirectory and make it read-only
+	readOnlyDir := filepath.Join(tmpDir, "readonly")
+	if err := os.MkdirAll(readOnlyDir, 0700); err != nil {
+		t.Fatalf("Failed to create directory: %v", err)
+	}
+
+	// Write a file first, then make directory read-only
+	targetPath := filepath.Join(readOnlyDir, "snapshot.json")
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    map[string]any{"key": "value"},
+	}
+
+	// First write should succeed
+	if err := WriteSnapshot(snapshot, targetPath); err != nil {
+		t.Fatalf("First write failed: %v", err)
+	}
+
+	// Now make the directory read-only
+	if err := os.Chmod(readOnlyDir, 0500); err != nil {
+		t.Fatalf("Failed to chmod directory: %v", err)
+	}
+	defer os.Chmod(readOnlyDir, 0700) // Restore permissions for cleanup
+
+	// Try to write again - should fail because we can't create temp file
+	err := WriteSnapshot(snapshot, targetPath)
+	if err == nil {
+		t.Error("Expected error when writing to read-only directory")
+	}
+
+	// Verify no temp files are left behind
+	entries, err := os.ReadDir(readOnlyDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") {
+			t.Errorf("Temp file not cleaned up: %s", entry.Name())
+		}
+	}
+}
+
+func TestWriteSnapshot_OverwritesExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	// Write first snapshot
+	snapshot1 := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    map[string]any{"version": "1"},
+	}
+	if err := WriteSnapshot(snapshot1, targetPath); err != nil {
+		t.Fatalf("First write failed: %v", err)
+	}
+
+	// Write second snapshot to same path
+	snapshot2 := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Now().UTC(),
+		Config:    map[string]any{"version": "2"},
+	}
+	if err := WriteSnapshot(snapshot2, targetPath); err != nil {
+		t.Fatalf("Second write failed: %v", err)
+	}
+
+	// Verify second snapshot overwrote first
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to read file: %v", err)
+	}
+
+	var readSnapshot ConfigSnapshot
+	if err := json.Unmarshal(data, &readSnapshot); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if readSnapshot.Config["version"] != "2" {
+		t.Errorf("Expected version=2, got: %v", readSnapshot.Config["version"])
+	}
+}
+
+
+// Property-based tests for WriteSnapshot
+
+func TestWriteSnapshotProperties_TimestampFilenameConsistency(t *testing.T) {
+	// **Feature: snapshot-core, Property 5: Timestamp Filename Consistency**
+	// **Validates: Requirements 7.2, 7.3**
+	// For any snapshot written with a {{timestamp}} template path, the timestamp
+	// in the filename SHALL match the snapshot's internal Timestamp field
+	// (formatted as 20060102-150405).
+
+	tmpDir := t.TempDir()
+
+	// Test with various timestamps across different edge cases
+	testTimes := []time.Time{
+		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),      // New Year midnight
+		time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC), // End of year
+		time.Date(2024, 6, 15, 12, 30, 45, 0, time.UTC),  // Mid-year
+		time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),      // Y2K
+		time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC),    // Leap year
+		time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC), // Pre-Y2K
+		time.Date(2030, 7, 4, 15, 30, 0, 0, time.UTC),    // Future date
+	}
+
+	for i, snapshotTime := range testTimes {
+		// Create unique subdirectory for each test
+		testDir := filepath.Join(tmpDir, fmt.Sprintf("test%d", i))
+		templatePath := filepath.Join(testDir, "config-{{timestamp}}.json")
+
+		snapshot := &ConfigSnapshot{
+			Version:   SnapshotVersion,
+			Timestamp: snapshotTime,
+			Config:    map[string]any{"test": i},
+		}
+
+		err := WriteSnapshot(snapshot, templatePath)
+		if err != nil {
+			t.Fatalf("WriteSnapshot failed for time %v: %v", snapshotTime, err)
+		}
+
+		// Property: The filename timestamp must match the snapshot's internal timestamp
+		expectedTimestamp := snapshotTime.UTC().Format("20060102-150405")
+		expectedPath := filepath.Join(testDir, fmt.Sprintf("config-%s.json", expectedTimestamp))
+
+		// Verify the file exists at the expected path
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("Expected file at %s for snapshot time %v, but file does not exist",
+				expectedPath, snapshotTime)
+		}
+
+		// Read the file and verify the internal timestamp matches the filename
+		data, err := os.ReadFile(expectedPath)
+		if err != nil {
+			t.Fatalf("Failed to read file: %v", err)
+		}
+
+		var readSnapshot ConfigSnapshot
+		if err := json.Unmarshal(data, &readSnapshot); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+
+		// Property: Internal timestamp must match filename timestamp
+		internalTimestamp := readSnapshot.Timestamp.UTC().Format("20060102-150405")
+		if internalTimestamp != expectedTimestamp {
+			t.Errorf("Timestamp mismatch: filename has %s but internal timestamp is %s",
+				expectedTimestamp, internalTimestamp)
+		}
+	}
+}
+
+func TestWriteSnapshotProperties_TimestampNotCurrentTime(t *testing.T) {
+	// **Feature: snapshot-core, Property 5: Timestamp Filename Consistency**
+	// **Validates: Requirements 7.2, 7.3**
+	// Verify that WriteSnapshot uses the snapshot's timestamp, NOT the current time.
+
+	tmpDir := t.TempDir()
+	templatePath := filepath.Join(tmpDir, "config-{{timestamp}}.json")
+
+	// Create a snapshot with a timestamp in the past
+	pastTime := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: pastTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	// Write the snapshot (current time is 2024+, but filename should use 2020)
+	err := WriteSnapshot(snapshot, templatePath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// The file should be named with the snapshot's timestamp (2020), not current time
+	expectedPath := filepath.Join(tmpDir, "config-20200101-120000.json")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s (using snapshot timestamp), but file does not exist", expectedPath)
+
+		// List files in directory to see what was actually created
+		entries, _ := os.ReadDir(tmpDir)
+		for _, entry := range entries {
+			t.Logf("Found file: %s", entry.Name())
+		}
+	}
+
+	// Verify no file was created with current timestamp
+	// (We can't check all possible current timestamps, but we can verify the expected one exists)
+}
+
+func TestWriteSnapshotProperties_MultipleTimestampOccurrences(t *testing.T) {
+	// **Feature: snapshot-core, Property 5: Timestamp Filename Consistency**
+	// **Validates: Requirements 7.2, 7.3**
+	// Verify that multiple {{timestamp}} occurrences all use the same snapshot timestamp.
+
+	tmpDir := t.TempDir()
+	templatePath := filepath.Join(tmpDir, "{{timestamp}}", "config-{{timestamp}}.json")
+
+	snapshotTime := time.Date(2024, 3, 15, 9, 45, 30, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: snapshotTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	err := WriteSnapshot(snapshot, templatePath)
+	if err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Both occurrences should use the same timestamp
+	expectedTimestamp := "20240315-094530"
+	expectedPath := filepath.Join(tmpDir, expectedTimestamp, fmt.Sprintf("config-%s.json", expectedTimestamp))
+
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s, but file does not exist", expectedPath)
+
+		// List what was created
+		filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err == nil {
+				t.Logf("Found: %s", path)
+			}
+			return nil
+		})
 	}
 }
