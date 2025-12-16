@@ -277,8 +277,8 @@ func WriteSnapshot(snapshot *ConfigSnapshot, pathTemplate string) error {
 	// Create parent directories with 0700 permissions
 	dir := filepath.Dir(targetPath)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return err
+		if mkdirErr := os.MkdirAll(dir, 0700); mkdirErr != nil {
+			return mkdirErr
 		}
 	}
 
@@ -374,7 +374,6 @@ func formatFlatValue(v reflect.Value, prov *FieldProvenance) any {
 		return v.Interface()
 	}
 }
-
 
 // generateTempFileName generates a unique temporary file name for atomic writes.
 // The temp file is placed in the same directory as the target to ensure

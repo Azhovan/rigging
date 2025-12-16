@@ -1074,7 +1074,6 @@ func TestExpandPathProperties_TimezoneNormalization(t *testing.T) {
 	}
 }
 
-
 // generateTempFileName unit tests
 
 func TestGenerateTempFileName_UniqueNames(t *testing.T) {
@@ -1153,7 +1152,6 @@ func TestGenerateTempFileName_Format(t *testing.T) {
 	}
 }
 
-
 // WriteSnapshot unit tests
 
 func TestWriteSnapshot_WritesValidSnapshot(t *testing.T) {
@@ -1179,7 +1177,7 @@ func TestWriteSnapshot_WritesValidSnapshot(t *testing.T) {
 	}
 
 	// Verify file exists
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(targetPath); os.IsNotExist(statErr) {
 		t.Fatal("Snapshot file was not created")
 	}
 
@@ -1220,7 +1218,7 @@ func TestWriteSnapshot_CreatesParentDirectories(t *testing.T) {
 	}
 
 	// Verify file exists
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(targetPath); os.IsNotExist(statErr) {
 		t.Fatal("Snapshot file was not created")
 	}
 
@@ -1421,7 +1419,6 @@ func TestWriteSnapshot_OverwritesExistingFile(t *testing.T) {
 	}
 }
 
-
 // Property-based tests for WriteSnapshot
 
 func TestWriteSnapshotProperties_TimestampFilenameConsistency(t *testing.T) {
@@ -1465,7 +1462,7 @@ func TestWriteSnapshotProperties_TimestampFilenameConsistency(t *testing.T) {
 		expectedPath := filepath.Join(testDir, fmt.Sprintf("config-%s.json", expectedTimestamp))
 
 		// Verify the file exists at the expected path
-		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		if _, statErr := os.Stat(expectedPath); os.IsNotExist(statErr) {
 			t.Errorf("Expected file at %s for snapshot time %v, but file does not exist",
 				expectedPath, snapshotTime)
 		}
