@@ -1,7 +1,12 @@
 package rigging
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -246,6 +251,73 @@ func ExpandPathWithTime(template string, t time.Time) string {
 	return strings.ReplaceAll(template, "{{timestamp}}", timestamp)
 }
 
+// WriteSnapshot persists a snapshot to disk with atomic write semantics.
+// Supports {{timestamp}} template variable in path - uses snapshot.Timestamp
+// (not current time) to ensure filename matches internal metadata.
+// Returns ErrSnapshotTooLarge if serialized size exceeds 100MB.
+func WriteSnapshot(snapshot *ConfigSnapshot, pathTemplate string) error {
+	if snapshot == nil {
+		return ErrNilConfig
+	}
+
+	// Expand path template using snapshot's timestamp for consistency
+	targetPath := ExpandPathWithTime(pathTemplate, snapshot.Timestamp)
+
+	// Marshal snapshot to indented JSON
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Check size against MaxSnapshotSize
+	if len(data) > MaxSnapshotSize {
+		return ErrSnapshotTooLarge
+	}
+
+	// Create parent directories with 0700 permissions
+	dir := filepath.Dir(targetPath)
+	if dir != "" && dir != "." {
+		if mkdirErr := os.MkdirAll(dir, 0700); mkdirErr != nil {
+			return mkdirErr
+		}
+	}
+
+	// Generate temp file name in same directory for atomic rename
+	tempPath, err := generateTempFileName(targetPath)
+	if err != nil {
+		return err
+	}
+
+	// Ensure temp file is cleaned up on any error
+	var tempFileCreated bool
+	defer func() {
+		if tempFileCreated {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	// Write to temp file
+	if err := os.WriteFile(tempPath, data, 0600); err != nil {
+		return err
+	}
+	tempFileCreated = true
+
+	// Set file permissions explicitly (WriteFile should set them, but be explicit)
+	if err := os.Chmod(tempPath, 0600); err != nil {
+		return err
+	}
+
+	// Atomic rename temp file to target path
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		return err
+	}
+
+	// Rename succeeded, don't clean up temp file (it's now the target)
+	tempFileCreated = false
+
+	return nil
+}
+
 // formatFlatValue formats a field value for the flattened config map.
 // Secrets are redacted, other values are returned in their natural types.
 func formatFlatValue(v reflect.Value, prov *FieldProvenance) any {
@@ -301,4 +373,18 @@ func formatFlatValue(v reflect.Value, prov *FieldProvenance) any {
 	default:
 		return v.Interface()
 	}
+}
+
+// generateTempFileName generates a unique temporary file name for atomic writes.
+// The temp file is placed in the same directory as the target to ensure
+// atomic rename works (same filesystem).
+// Format: targetPath + ".tmp." + randomHex
+func generateTempFileName(targetPath string) (string, error) {
+	// Generate 8 random bytes (16 hex chars)
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	suffix := hex.EncodeToString(randomBytes)
+	return targetPath + ".tmp." + suffix, nil
 }
