@@ -2,6 +2,7 @@ package rigging
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1559,5 +1560,280 @@ func TestWriteSnapshotProperties_MultipleTimestampOccurrences(t *testing.T) {
 			}
 			return nil
 		})
+	}
+}
+
+// ReadSnapshot unit tests
+
+func TestReadSnapshot_ReadsValidSnapshotFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	// Create a valid snapshot and write it
+	originalSnapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
+		Config: map[string]any{
+			"host": "localhost",
+			"port": float64(8080), // JSON numbers are float64
+		},
+		Provenance: []FieldProvenance{
+			{FieldPath: "Host", KeyPath: "host", SourceName: "env:HOST", Secret: false},
+			{FieldPath: "Port", KeyPath: "port", SourceName: "file:config.yaml", Secret: false},
+		},
+	}
+
+	if err := WriteSnapshot(originalSnapshot, targetPath); err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Read the snapshot back
+	readSnapshot, err := ReadSnapshot(targetPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify all fields match
+	if readSnapshot.Version != originalSnapshot.Version {
+		t.Errorf("Version mismatch: expected %s, got %s", originalSnapshot.Version, readSnapshot.Version)
+	}
+	if !readSnapshot.Timestamp.Equal(originalSnapshot.Timestamp) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", originalSnapshot.Timestamp, readSnapshot.Timestamp)
+	}
+	if readSnapshot.Config["host"] != originalSnapshot.Config["host"] {
+		t.Errorf("Config host mismatch: expected %v, got %v", originalSnapshot.Config["host"], readSnapshot.Config["host"])
+	}
+	if readSnapshot.Config["port"] != originalSnapshot.Config["port"] {
+		t.Errorf("Config port mismatch: expected %v, got %v", originalSnapshot.Config["port"], readSnapshot.Config["port"])
+	}
+	if len(readSnapshot.Provenance) != len(originalSnapshot.Provenance) {
+		t.Errorf("Provenance length mismatch: expected %d, got %d", len(originalSnapshot.Provenance), len(readSnapshot.Provenance))
+	}
+}
+
+func TestReadSnapshot_ReturnsErrorForMissingFile(t *testing.T) {
+	nonExistentPath := "/path/that/does/not/exist/snapshot.json"
+
+	snapshot, err := ReadSnapshot(nonExistentPath)
+
+	if err == nil {
+		t.Error("Expected error for missing file, got nil")
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot for missing file, got: %v", snapshot)
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("Expected os.ErrNotExist, got: %v", err)
+	}
+}
+
+func TestReadSnapshot_ReturnsErrorForInvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "invalid.json")
+
+	// Write invalid JSON to file
+	invalidJSON := []byte(`{"version": "1.0", "config": {invalid json here}`)
+	if err := os.WriteFile(targetPath, invalidJSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+
+	if err == nil {
+		t.Error("Expected error for invalid JSON, got nil")
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot for invalid JSON, got: %v", snapshot)
+	}
+
+	// Verify it's a JSON syntax error
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		t.Errorf("Expected json.SyntaxError, got: %T - %v", err, err)
+	}
+}
+
+func TestReadSnapshot_ReturnsErrorForMissingVersionField(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "no-version.json")
+
+	// Write JSON without version field
+	noVersionJSON := []byte(`{
+		"timestamp": "2024-01-15T10:30:45Z",
+		"config": {"host": "localhost"},
+		"provenance": []
+	}`)
+	if err := os.WriteFile(targetPath, noVersionJSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+
+	if err != ErrUnsupportedVersion {
+		t.Errorf("Expected ErrUnsupportedVersion for missing version, got: %v", err)
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot for missing version, got: %v", snapshot)
+	}
+}
+
+func TestReadSnapshot_ReturnsErrUnsupportedVersionForUnknownVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "future-version.json")
+
+	// Write JSON with unsupported version
+	futureVersionJSON := []byte(`{
+		"version": "99.0",
+		"timestamp": "2024-01-15T10:30:45Z",
+		"config": {"host": "localhost"},
+		"provenance": []
+	}`)
+	if err := os.WriteFile(targetPath, futureVersionJSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+
+	if err != ErrUnsupportedVersion {
+		t.Errorf("Expected ErrUnsupportedVersion for unsupported version, got: %v", err)
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot for unsupported version, got: %v", snapshot)
+	}
+}
+
+func TestReadSnapshot_ReturnsErrUnsupportedVersionForEmptyVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "empty-version.json")
+
+	// Write JSON with empty version string
+	emptyVersionJSON := []byte(`{
+		"version": "",
+		"timestamp": "2024-01-15T10:30:45Z",
+		"config": {"host": "localhost"},
+		"provenance": []
+	}`)
+	if err := os.WriteFile(targetPath, emptyVersionJSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+
+	if err != ErrUnsupportedVersion {
+		t.Errorf("Expected ErrUnsupportedVersion for empty version, got: %v", err)
+	}
+	if snapshot != nil {
+		t.Errorf("Expected nil snapshot for empty version, got: %v", snapshot)
+	}
+}
+
+func TestReadSnapshot_AcceptsVersion1_0(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "v1.json")
+
+	// Write JSON with version 1.0
+	v1JSON := []byte(`{
+		"version": "1.0",
+		"timestamp": "2024-01-15T10:30:45Z",
+		"config": {"host": "localhost"},
+		"provenance": []
+	}`)
+	if err := os.WriteFile(targetPath, v1JSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+
+	if err != nil {
+		t.Errorf("Expected no error for version 1.0, got: %v", err)
+	}
+	if snapshot == nil {
+		t.Fatal("Expected snapshot for version 1.0, got nil")
+	}
+	if snapshot.Version != "1.0" {
+		t.Errorf("Expected version 1.0, got: %s", snapshot.Version)
+	}
+}
+
+func TestReadSnapshot_PreservesAllFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "full-snapshot.json")
+
+	// Write a complete snapshot with all fields
+	fullJSON := []byte(`{
+		"version": "1.0",
+		"timestamp": "2024-06-15T14:30:45Z",
+		"config": {
+			"database.host": "db.example.com",
+			"database.port": 5432,
+			"database.password": "***redacted***",
+			"api.timeout": "30s",
+			"api.enabled": true,
+			"api.rate_limit": 1000.5
+		},
+		"provenance": [
+			{
+				"FieldPath": "Database.Host",
+				"KeyPath": "database.host",
+				"SourceName": "file:config.yaml",
+				"Secret": false
+			},
+			{
+				"FieldPath": "Database.Password",
+				"KeyPath": "database.password",
+				"SourceName": "env:DB_PASSWORD",
+				"Secret": true
+			}
+		]
+	}`)
+	if err := os.WriteFile(targetPath, fullJSON, 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	snapshot, err := ReadSnapshot(targetPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify version
+	if snapshot.Version != "1.0" {
+		t.Errorf("Version mismatch: expected 1.0, got %s", snapshot.Version)
+	}
+
+	// Verify timestamp
+	expectedTime := time.Date(2024, 6, 15, 14, 30, 45, 0, time.UTC)
+	if !snapshot.Timestamp.Equal(expectedTime) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", expectedTime, snapshot.Timestamp)
+	}
+
+	// Verify config fields
+	if snapshot.Config["database.host"] != "db.example.com" {
+		t.Errorf("Config database.host mismatch: got %v", snapshot.Config["database.host"])
+	}
+	if snapshot.Config["database.port"] != float64(5432) {
+		t.Errorf("Config database.port mismatch: got %v (type: %T)", snapshot.Config["database.port"], snapshot.Config["database.port"])
+	}
+	if snapshot.Config["database.password"] != "***redacted***" {
+		t.Errorf("Config database.password mismatch: got %v", snapshot.Config["database.password"])
+	}
+	if snapshot.Config["api.timeout"] != "30s" {
+		t.Errorf("Config api.timeout mismatch: got %v", snapshot.Config["api.timeout"])
+	}
+	if snapshot.Config["api.enabled"] != true {
+		t.Errorf("Config api.enabled mismatch: got %v", snapshot.Config["api.enabled"])
+	}
+	if snapshot.Config["api.rate_limit"] != 1000.5 {
+		t.Errorf("Config api.rate_limit mismatch: got %v", snapshot.Config["api.rate_limit"])
+	}
+
+	// Verify provenance
+	if len(snapshot.Provenance) != 2 {
+		t.Errorf("Provenance length mismatch: expected 2, got %d", len(snapshot.Provenance))
+	}
+	if snapshot.Provenance[0].FieldPath != "Database.Host" {
+		t.Errorf("Provenance[0].FieldPath mismatch: got %s", snapshot.Provenance[0].FieldPath)
+	}
+	if snapshot.Provenance[1].Secret != true {
+		t.Errorf("Provenance[1].Secret mismatch: expected true, got %v", snapshot.Provenance[1].Secret)
 	}
 }

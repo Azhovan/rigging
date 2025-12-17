@@ -31,9 +31,6 @@ var (
 )
 
 // supportedVersions lists snapshot format versions that can be read.
-// Used by ReadSnapshot in Phase 5.
-//
-//nolint:unused // Will be used by ReadSnapshot implementation
 var supportedVersions = map[string]bool{
 	"1.0": true,
 }
@@ -316,6 +313,35 @@ func WriteSnapshot(snapshot *ConfigSnapshot, pathTemplate string) error {
 	tempFileCreated = false
 
 	return nil
+}
+
+// ReadSnapshot loads a snapshot from disk.
+// Returns ErrUnsupportedVersion if snapshot version is not supported.
+// Returns appropriate errors for missing file or invalid JSON.
+func ReadSnapshot(path string) (*ConfigSnapshot, error) {
+	// Read file contents
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal JSON to ConfigSnapshot
+	var snapshot ConfigSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil, err
+	}
+
+	// Validate version field is present
+	if snapshot.Version == "" {
+		return nil, ErrUnsupportedVersion
+	}
+
+	// Check version against supportedVersions map
+	if !supportedVersions[snapshot.Version] {
+		return nil, ErrUnsupportedVersion
+	}
+
+	return &snapshot, nil
 }
 
 // formatFlatValue formats a field value for the flattened config map.
