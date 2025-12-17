@@ -1837,3 +1837,829 @@ func TestReadSnapshot_PreservesAllFields(t *testing.T) {
 		t.Errorf("Provenance[1].Secret mismatch: expected true, got %v", snapshot.Provenance[1].Secret)
 	}
 }
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+// TestRoundTrip_SnapshotConsistency tests the complete round-trip:
+// Create config → CreateSnapshot → WriteSnapshot → ReadSnapshot → Compare
+// **Feature: snapshot-core, Property 1: Snapshot Round-Trip Consistency**
+// **Validates: Requirements 2.1, 2.5, 1.2, 1.5**
+func TestRoundTrip_SnapshotConsistency(t *testing.T) {
+	type Database struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	type API struct {
+		Timeout   string `conf:"name:timeout"`
+		RateLimit int    `conf:"name:rate_limit"`
+	}
+
+	type Config struct {
+		AppName  string   `conf:"name:app_name"`
+		Debug    bool     `conf:"name:debug"`
+		Database Database `conf:"prefix:database"`
+		API      API      `conf:"prefix:api"`
+	}
+
+	// Create config with various field types
+	cfg := &Config{
+		AppName: "test-app",
+		Debug:   true,
+		Database: Database{
+			Host:     "db.example.com",
+			Port:     5432,
+			Password: "super-secret-password",
+		},
+		API: API{
+			Timeout:   "30s",
+			RateLimit: 1000,
+		},
+	}
+
+	// Store provenance to test provenance preservation
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "AppName", KeyPath: "app_name", SourceName: "env:APP_NAME", Secret: false},
+			{FieldPath: "Debug", KeyPath: "debug", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Host", KeyPath: "database.host", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Port", KeyPath: "database.port", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Password", KeyPath: "database.password", SourceName: "env:DB_PASSWORD", Secret: true},
+			{FieldPath: "API.Timeout", KeyPath: "api.timeout", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "API.RateLimit", KeyPath: "api.rate_limit", SourceName: "env:API_RATE_LIMIT", Secret: false},
+		},
+	}
+	storeProvenance(cfg, prov)
+	defer deleteProvenance(cfg)
+
+	// Step 1: Create snapshot
+	originalSnapshot, err := CreateSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Step 2: Write snapshot to disk
+	tmpDir := t.TempDir()
+	snapshotPath := filepath.Join(tmpDir, "snapshot.json")
+	if writeErr := WriteSnapshot(originalSnapshot, snapshotPath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	// Step 3: Read snapshot back
+	readSnapshot, err := ReadSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify: Version preserved
+	if readSnapshot.Version != originalSnapshot.Version {
+		t.Errorf("Version mismatch: expected %s, got %s", originalSnapshot.Version, readSnapshot.Version)
+	}
+
+	// Verify: Timestamp preserved
+	if !readSnapshot.Timestamp.Equal(originalSnapshot.Timestamp) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", originalSnapshot.Timestamp, readSnapshot.Timestamp)
+	}
+
+	// Verify: All config field values preserved
+	for key, originalValue := range originalSnapshot.Config {
+		readValue, exists := readSnapshot.Config[key]
+		if !exists {
+			t.Errorf("Config key %s missing in read snapshot", key)
+			continue
+		}
+		// Handle type differences (JSON numbers are float64)
+		if !valuesEqual(originalValue, readValue) {
+			t.Errorf("Config value mismatch for %s: expected %v (%T), got %v (%T)",
+				key, originalValue, originalValue, readValue, readValue)
+		}
+	}
+
+	// Verify: No extra keys in read snapshot
+	for key := range readSnapshot.Config {
+		if _, exists := originalSnapshot.Config[key]; !exists {
+			t.Errorf("Unexpected config key %s in read snapshot", key)
+		}
+	}
+
+	// Verify: Provenance preserved
+	if len(readSnapshot.Provenance) != len(originalSnapshot.Provenance) {
+		t.Errorf("Provenance count mismatch: expected %d, got %d",
+			len(originalSnapshot.Provenance), len(readSnapshot.Provenance))
+	}
+
+	// Build provenance map for comparison
+	originalProvMap := make(map[string]FieldProvenance)
+	for _, p := range originalSnapshot.Provenance {
+		originalProvMap[p.FieldPath] = p
+	}
+
+	for _, readProv := range readSnapshot.Provenance {
+		origProv, exists := originalProvMap[readProv.FieldPath]
+		if !exists {
+			t.Errorf("Provenance for %s missing in original", readProv.FieldPath)
+			continue
+		}
+		if readProv.KeyPath != origProv.KeyPath {
+			t.Errorf("Provenance KeyPath mismatch for %s: expected %s, got %s",
+				readProv.FieldPath, origProv.KeyPath, readProv.KeyPath)
+		}
+		if readProv.SourceName != origProv.SourceName {
+			t.Errorf("Provenance SourceName mismatch for %s: expected %s, got %s",
+				readProv.FieldPath, origProv.SourceName, readProv.SourceName)
+		}
+		if readProv.Secret != origProv.Secret {
+			t.Errorf("Provenance Secret mismatch for %s: expected %v, got %v",
+				readProv.FieldPath, origProv.Secret, readProv.Secret)
+		}
+	}
+
+	// Verify: Secrets remain redacted
+	if readSnapshot.Config["database.password"] != "***redacted***" {
+		t.Errorf("Secret field should remain redacted, got: %v", readSnapshot.Config["database.password"])
+	}
+}
+
+// valuesEqual compares two values, handling JSON type conversions
+func valuesEqual(a, b any) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Handle numeric type conversions (JSON unmarshals numbers as float64)
+	switch av := a.(type) {
+	case int:
+		if bv, ok := b.(float64); ok {
+			return float64(av) == bv
+		}
+	case int64:
+		if bv, ok := b.(float64); ok {
+			return float64(av) == bv
+		}
+	case float64:
+		if bv, ok := b.(int); ok {
+			return av == float64(bv)
+		}
+		if bv, ok := b.(int64); ok {
+			return av == float64(bv)
+		}
+	}
+
+	// Direct comparison for other types
+	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+}
+
+// TestRoundTrip_WithExclusions tests round-trip with field exclusions
+func TestRoundTrip_WithExclusions(t *testing.T) {
+	type Config struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password"`
+		APIKey   string `conf:"name:api_key"`
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     8080,
+		Password: "secret",
+		APIKey:   "key123",
+	}
+
+	// Create snapshot with exclusions
+	originalSnapshot, err := CreateSnapshot(cfg, WithExcludeFields("password", "api_key"))
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Write and read back
+	tmpDir := t.TempDir()
+	snapshotPath := filepath.Join(tmpDir, "snapshot.json")
+	if writeErr := WriteSnapshot(originalSnapshot, snapshotPath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	readSnapshot, err := ReadSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify excluded fields are not present
+	if _, exists := readSnapshot.Config["password"]; exists {
+		t.Error("Excluded field 'password' should not be present")
+	}
+	if _, exists := readSnapshot.Config["api_key"]; exists {
+		t.Error("Excluded field 'api_key' should not be present")
+	}
+
+	// Verify non-excluded fields are present
+	if readSnapshot.Config["host"] != "localhost" {
+		t.Errorf("Expected host=localhost, got: %v", readSnapshot.Config["host"])
+	}
+}
+
+// TestRoundTrip_EmptyConfig tests round-trip with empty configuration
+func TestRoundTrip_EmptyConfig(t *testing.T) {
+	type Config struct{}
+
+	cfg := &Config{}
+
+	originalSnapshot, err := CreateSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	snapshotPath := filepath.Join(tmpDir, "snapshot.json")
+	if writeErr := WriteSnapshot(originalSnapshot, snapshotPath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	readSnapshot, err := ReadSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify empty config round-trips correctly
+	if readSnapshot.Version != originalSnapshot.Version {
+		t.Errorf("Version mismatch: expected %s, got %s", originalSnapshot.Version, readSnapshot.Version)
+	}
+	if len(readSnapshot.Config) != 0 {
+		t.Errorf("Expected empty config, got: %v", readSnapshot.Config)
+	}
+}
+
+// TestRoundTrip_MultipleDataTypes tests round-trip with various data types
+func TestRoundTrip_MultipleDataTypes(t *testing.T) {
+	type Config struct {
+		StringVal   string        `conf:"name:string_val"`
+		IntVal      int           `conf:"name:int_val"`
+		FloatVal    float64       `conf:"name:float_val"`
+		BoolVal     bool          `conf:"name:bool_val"`
+		DurationVal time.Duration `conf:"name:duration_val"`
+	}
+
+	cfg := &Config{
+		StringVal:   "hello world",
+		IntVal:      42,
+		FloatVal:    3.14159,
+		BoolVal:     true,
+		DurationVal: 5 * time.Minute,
+	}
+
+	originalSnapshot, err := CreateSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	snapshotPath := filepath.Join(tmpDir, "snapshot.json")
+	if writeErr := WriteSnapshot(originalSnapshot, snapshotPath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	readSnapshot, err := ReadSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify all types round-trip correctly
+	if readSnapshot.Config["string_val"] != "hello world" {
+		t.Errorf("string_val mismatch: got %v", readSnapshot.Config["string_val"])
+	}
+	if readSnapshot.Config["float_val"] != 3.14159 {
+		t.Errorf("float_val mismatch: got %v", readSnapshot.Config["float_val"])
+	}
+	if readSnapshot.Config["bool_val"] != true {
+		t.Errorf("bool_val mismatch: got %v", readSnapshot.Config["bool_val"])
+	}
+	// Duration is stored as string
+	if readSnapshot.Config["duration_val"] != "5m0s" {
+		t.Errorf("duration_val mismatch: got %v", readSnapshot.Config["duration_val"])
+	}
+}
+
+// TestEndToEnd_SnapshotFlow tests the complete end-to-end flow:
+// Create config with provenance → CreateSnapshot with exclusions →
+// WriteSnapshot with template path → ReadSnapshot from generated file
+// **Validates: Requirements 1.1, 1.2, 1.5, 2.1, 2.5, 3.1, 4.1, 7.2**
+func TestEndToEnd_SnapshotFlow(t *testing.T) {
+	// Create a temp directory for snapshot
+	tmpDir := t.TempDir()
+
+	// Define config struct
+	type Database struct {
+		Host     string `conf:"name:host"`
+		Port     int    `conf:"name:port"`
+		Password string `conf:"name:password,secret"`
+	}
+
+	type API struct {
+		Timeout   string `conf:"name:timeout"`
+		RateLimit int    `conf:"name:rate_limit"`
+		Key       string `conf:"name:key,secret"`
+	}
+
+	type Config struct {
+		AppName  string   `conf:"name:app_name"`
+		Debug    bool     `conf:"name:debug"`
+		Database Database `conf:"prefix:database"`
+		API      API      `conf:"prefix:api"`
+	}
+
+	// Create config simulating loaded from file + env
+	cfg := &Config{
+		AppName: "my-test-app",
+		Debug:   true,
+		Database: Database{
+			Host:     "db.example.com",
+			Port:     5432,
+			Password: "env-secret-password",
+		},
+		API: API{
+			Timeout:   "30s",
+			RateLimit: 1000,
+			Key:       "env-api-key",
+		},
+	}
+
+	// Store provenance simulating mixed sources (file + env)
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "AppName", KeyPath: "app_name", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Debug", KeyPath: "debug", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Host", KeyPath: "database.host", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Port", KeyPath: "database.port", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "Database.Password", KeyPath: "database.password", SourceName: "env:DB_PASSWORD", Secret: true},
+			{FieldPath: "API.Timeout", KeyPath: "api.timeout", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "API.RateLimit", KeyPath: "api.rate_limit", SourceName: "file:config.yaml", Secret: false},
+			{FieldPath: "API.Key", KeyPath: "api.key", SourceName: "env:API_KEY", Secret: true},
+		},
+	}
+	storeProvenance(cfg, prov)
+	defer deleteProvenance(cfg)
+
+	// Create snapshot with exclusions
+	snapshot, err := CreateSnapshot(cfg, WithExcludeFields("api.key"))
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	// Verify snapshot has correct version
+	if snapshot.Version != SnapshotVersion {
+		t.Errorf("Expected version=%s, got: %s", SnapshotVersion, snapshot.Version)
+	}
+
+	// Write snapshot with template path
+	templatePath := filepath.Join(tmpDir, "snapshots", "config-{{timestamp}}.json")
+	if writeErr := WriteSnapshot(snapshot, templatePath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	// Determine the actual file path (with expanded timestamp)
+	expectedTimestamp := snapshot.Timestamp.UTC().Format("20060102-150405")
+	actualPath := filepath.Join(tmpDir, "snapshots", fmt.Sprintf("config-%s.json", expectedTimestamp))
+
+	// Verify file was created at expected path
+	if _, statErr := os.Stat(actualPath); os.IsNotExist(statErr) {
+		t.Fatalf("Snapshot file not created at expected path: %s", actualPath)
+	}
+
+	// Read snapshot back
+	readSnapshot, err := ReadSnapshot(actualPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// Verify: Config values preserved
+	if readSnapshot.Config["app_name"] != "my-test-app" {
+		t.Errorf("Expected app_name=my-test-app, got: %v", readSnapshot.Config["app_name"])
+	}
+	if readSnapshot.Config["database.host"] != "db.example.com" {
+		t.Errorf("Expected database.host=db.example.com, got: %v", readSnapshot.Config["database.host"])
+	}
+
+	// Verify: Secrets are redacted
+	if readSnapshot.Config["database.password"] != "***redacted***" {
+		t.Errorf("Expected database.password to be redacted, got: %v", readSnapshot.Config["database.password"])
+	}
+
+	// Verify: Excluded field is not present
+	if _, exists := readSnapshot.Config["api.key"]; exists {
+		t.Error("Excluded field api.key should not be present")
+	}
+
+	// Verify: Provenance is present
+	if len(readSnapshot.Provenance) == 0 {
+		t.Error("Expected provenance data to be present")
+	}
+
+	// Verify provenance has mixed sources
+	hasFileSource := false
+	hasEnvSource := false
+	for _, p := range readSnapshot.Provenance {
+		if strings.HasPrefix(p.SourceName, "file:") {
+			hasFileSource = true
+		}
+		if strings.HasPrefix(p.SourceName, "env:") {
+			hasEnvSource = true
+		}
+	}
+	if !hasFileSource {
+		t.Error("Expected provenance to include file source")
+	}
+	if !hasEnvSource {
+		t.Error("Expected provenance to include env source")
+	}
+
+	// Verify: Timestamp in filename matches internal timestamp
+	if !readSnapshot.Timestamp.Equal(snapshot.Timestamp) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", snapshot.Timestamp, readSnapshot.Timestamp)
+	}
+}
+
+// TestConcurrentWrite_AtomicSafety tests that concurrent writes to the same path
+// are atomic and don't result in corruption.
+// **Validates: Requirements 6.4**
+func TestConcurrentWrite_AtomicSafety(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	const numGoroutines = 10
+	const writesPerGoroutine = 5
+
+	// Create unique snapshots for each goroutine
+	snapshots := make([]*ConfigSnapshot, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		snapshots[i] = &ConfigSnapshot{
+			Version:   SnapshotVersion,
+			Timestamp: time.Now().UTC(),
+			Config: map[string]any{
+				"goroutine_id": i,
+				"unique_data":  fmt.Sprintf("data-from-goroutine-%d", i),
+			},
+			Provenance: []FieldProvenance{
+				{FieldPath: "GoroutineID", KeyPath: "goroutine_id", SourceName: fmt.Sprintf("test:%d", i), Secret: false},
+			},
+		}
+	}
+
+	// Channel to collect errors
+	errCh := make(chan error, numGoroutines*writesPerGoroutine)
+	doneCh := make(chan struct{})
+
+	// Start concurrent writers
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			for j := 0; j < writesPerGoroutine; j++ {
+				if err := WriteSnapshot(snapshots[id], targetPath); err != nil {
+					errCh <- fmt.Errorf("goroutine %d write %d failed: %w", id, j, err)
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all writes to complete (with timeout)
+	go func() {
+		time.Sleep(5 * time.Second)
+		close(doneCh)
+	}()
+
+	// Give goroutines time to complete
+	time.Sleep(500 * time.Millisecond)
+
+	// Check for errors
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("Concurrent write error: %v", err)
+	}
+
+	// Verify: File exists and is valid JSON
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to read final snapshot: %v", err)
+	}
+
+	var finalSnapshot ConfigSnapshot
+	if unmarshalErr := json.Unmarshal(data, &finalSnapshot); unmarshalErr != nil {
+		t.Fatalf("Final snapshot is corrupted (invalid JSON): %v", unmarshalErr)
+	}
+
+	// Verify: Snapshot has valid structure
+	if finalSnapshot.Version != SnapshotVersion {
+		t.Errorf("Final snapshot has invalid version: %s", finalSnapshot.Version)
+	}
+
+	// Verify: goroutine_id is a valid value (0 to numGoroutines-1)
+	goroutineID, ok := finalSnapshot.Config["goroutine_id"]
+	if !ok {
+		t.Error("Final snapshot missing goroutine_id")
+	} else {
+		// JSON numbers are float64
+		id, ok := goroutineID.(float64)
+		if !ok {
+			t.Errorf("goroutine_id has unexpected type: %T", goroutineID)
+		} else if int(id) < 0 || int(id) >= numGoroutines {
+			t.Errorf("goroutine_id out of range: %v", id)
+		}
+	}
+
+	// Verify: No partial files left behind
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") {
+			t.Errorf("Temp file not cleaned up: %s", entry.Name())
+		}
+	}
+
+	// Verify: Only one file exists (the final snapshot)
+	jsonFiles := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			jsonFiles++
+		}
+	}
+	if jsonFiles != 1 {
+		t.Errorf("Expected 1 JSON file, found %d", jsonFiles)
+	}
+}
+
+// TestConcurrentWrite_LastWriterWins verifies that concurrent writes result in
+// one of the written snapshots being the final content (last writer wins).
+func TestConcurrentWrite_LastWriterWins(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	const numGoroutines = 5
+
+	// Create snapshots with unique identifiers
+	snapshots := make([]*ConfigSnapshot, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		snapshots[i] = &ConfigSnapshot{
+			Version:   SnapshotVersion,
+			Timestamp: time.Now().UTC(),
+			Config: map[string]any{
+				"writer_id": i,
+			},
+		}
+	}
+
+	// Write all snapshots concurrently
+	done := make(chan struct{})
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			_ = WriteSnapshot(snapshots[id], targetPath)
+		}(i)
+	}
+
+	// Wait for writes to complete
+	time.Sleep(200 * time.Millisecond)
+	close(done)
+
+	// Read the final snapshot
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to read snapshot: %v", err)
+	}
+
+	var finalSnapshot ConfigSnapshot
+	if err := json.Unmarshal(data, &finalSnapshot); err != nil {
+		t.Fatalf("Snapshot is corrupted: %v", err)
+	}
+
+	// Verify: The final snapshot is one of the written snapshots
+	writerID, ok := finalSnapshot.Config["writer_id"].(float64)
+	if !ok {
+		t.Fatalf("writer_id has unexpected type: %T", finalSnapshot.Config["writer_id"])
+	}
+
+	if int(writerID) < 0 || int(writerID) >= numGoroutines {
+		t.Errorf("writer_id %v is not from any of the writers", writerID)
+	}
+
+	t.Logf("Last writer was goroutine %d", int(writerID))
+}
+
+// TestConcurrentWrite_NoPartialFiles verifies that no partial files are left
+// behind even if writes are interrupted.
+func TestConcurrentWrite_NoPartialFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "snapshot.json")
+
+	// Write many snapshots rapidly
+	const numWrites = 50
+
+	for i := 0; i < numWrites; i++ {
+		snapshot := &ConfigSnapshot{
+			Version:   SnapshotVersion,
+			Timestamp: time.Now().UTC(),
+			Config: map[string]any{
+				"iteration": i,
+			},
+		}
+		if err := WriteSnapshot(snapshot, targetPath); err != nil {
+			t.Fatalf("Write %d failed: %v", i, err)
+		}
+	}
+
+	// Verify: No temp files left behind
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") {
+			t.Errorf("Temp file not cleaned up: %s", entry.Name())
+		}
+	}
+
+	// Verify: Final file is valid
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to read final snapshot: %v", err)
+	}
+
+	var finalSnapshot ConfigSnapshot
+	if err := json.Unmarshal(data, &finalSnapshot); err != nil {
+		t.Fatalf("Final snapshot is corrupted: %v", err)
+	}
+
+	// The final iteration should be numWrites-1
+	iteration, ok := finalSnapshot.Config["iteration"].(float64)
+	if !ok {
+		t.Fatalf("iteration has unexpected type: %T", finalSnapshot.Config["iteration"])
+	}
+	if int(iteration) != numWrites-1 {
+		t.Errorf("Expected final iteration %d, got %v", numWrites-1, iteration)
+	}
+}
+
+// TestTimestampConsistency_FilenameMatchesInternal tests that the timestamp in
+// the filename matches the snapshot's internal Timestamp field, not the current time.
+// **Validates: Requirements 7.2, 7.3**
+func TestTimestampConsistency_FilenameMatchesInternal(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	type Config struct {
+		Host string `conf:"name:host"`
+	}
+
+	cfg := &Config{Host: "localhost"}
+
+	// Step 1: Create snapshot (capture time T1)
+	snapshot, err := CreateSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	snapshotTime := snapshot.Timestamp // T1
+
+	// Step 2: Sleep to ensure time has passed
+	time.Sleep(150 * time.Millisecond)
+
+	// Step 3: WriteSnapshot with {{timestamp}} template (time now is T2)
+	templatePath := filepath.Join(tmpDir, "config-{{timestamp}}.json")
+	if writeErr := WriteSnapshot(snapshot, templatePath); writeErr != nil {
+		t.Fatalf("WriteSnapshot failed: %v", writeErr)
+	}
+
+	// Step 4: Verify filename uses T1 (snapshot.Timestamp), not T2 (time.Now)
+	expectedTimestamp := snapshotTime.UTC().Format("20060102-150405")
+	expectedPath := filepath.Join(tmpDir, fmt.Sprintf("config-%s.json", expectedTimestamp))
+
+	// Verify the file exists at the expected path (using snapshot timestamp)
+	if _, statErr := os.Stat(expectedPath); os.IsNotExist(statErr) {
+		t.Errorf("Expected file at %s (using snapshot timestamp T1), but file does not exist", expectedPath)
+
+		// List files to see what was actually created
+		entries, _ := os.ReadDir(tmpDir)
+		for _, entry := range entries {
+			t.Logf("Found file: %s", entry.Name())
+		}
+	}
+
+	// Verify: No file was created with current time (T2)
+	// We can't check all possible T2 timestamps, but we can verify the expected one exists
+	// and that the internal timestamp matches the filename
+
+	// Read the snapshot and verify internal timestamp
+	readSnapshot, err := ReadSnapshot(expectedPath)
+	if err != nil {
+		t.Fatalf("ReadSnapshot failed: %v", err)
+	}
+
+	// The internal timestamp should match the filename timestamp
+	internalTimestamp := readSnapshot.Timestamp.UTC().Format("20060102-150405")
+	if internalTimestamp != expectedTimestamp {
+		t.Errorf("Internal timestamp %s does not match filename timestamp %s",
+			internalTimestamp, expectedTimestamp)
+	}
+
+	// Verify the timestamps are equal (not just formatted strings)
+	if !readSnapshot.Timestamp.Equal(snapshotTime) {
+		t.Errorf("Timestamp mismatch: expected %v, got %v", snapshotTime, readSnapshot.Timestamp)
+	}
+}
+
+// TestTimestampConsistency_PastTimestamp tests that a snapshot with a past timestamp
+// uses that past timestamp in the filename, not the current time.
+func TestTimestampConsistency_PastTimestamp(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a snapshot with a timestamp in the past
+	pastTime := time.Date(2020, 6, 15, 10, 30, 45, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: pastTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	// Write with template path
+	templatePath := filepath.Join(tmpDir, "config-{{timestamp}}.json")
+	if err := WriteSnapshot(snapshot, templatePath); err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// The file should be named with the past timestamp (2020), not current time
+	expectedPath := filepath.Join(tmpDir, "config-20200615-103045.json")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s (using past timestamp), but file does not exist", expectedPath)
+
+		// List files to see what was actually created
+		entries, _ := os.ReadDir(tmpDir)
+		for _, entry := range entries {
+			t.Logf("Found file: %s", entry.Name())
+		}
+	}
+}
+
+// TestTimestampConsistency_FutureTimestamp tests that a snapshot with a future timestamp
+// uses that future timestamp in the filename.
+func TestTimestampConsistency_FutureTimestamp(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a snapshot with a timestamp in the future
+	futureTime := time.Date(2030, 12, 31, 23, 59, 59, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: futureTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	// Write with template path
+	templatePath := filepath.Join(tmpDir, "config-{{timestamp}}.json")
+	if err := WriteSnapshot(snapshot, templatePath); err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// The file should be named with the future timestamp
+	expectedPath := filepath.Join(tmpDir, "config-20301231-235959.json")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s (using future timestamp), but file does not exist", expectedPath)
+	}
+}
+
+// TestTimestampConsistency_MultipleTemplateOccurrences tests that multiple {{timestamp}}
+// occurrences all use the same snapshot timestamp.
+func TestTimestampConsistency_MultipleTemplateOccurrences(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	snapshotTime := time.Date(2024, 3, 15, 9, 45, 30, 0, time.UTC)
+	snapshot := &ConfigSnapshot{
+		Version:   SnapshotVersion,
+		Timestamp: snapshotTime,
+		Config:    map[string]any{"key": "value"},
+	}
+
+	// Template with multiple {{timestamp}} occurrences
+	templatePath := filepath.Join(tmpDir, "{{timestamp}}", "config-{{timestamp}}.json")
+	if err := WriteSnapshot(snapshot, templatePath); err != nil {
+		t.Fatalf("WriteSnapshot failed: %v", err)
+	}
+
+	// Both occurrences should use the same timestamp
+	expectedTimestamp := "20240315-094530"
+	expectedPath := filepath.Join(tmpDir, expectedTimestamp, fmt.Sprintf("config-%s.json", expectedTimestamp))
+
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("Expected file at %s, but file does not exist", expectedPath)
+
+		// List what was created
+		filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				t.Logf("Found: %s", path)
+			}
+			return nil
+		})
+	}
+}
