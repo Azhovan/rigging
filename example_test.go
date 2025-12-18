@@ -591,3 +591,232 @@ func ExampleLoader_Watch() {
 	// Output:
 	// Initial config loaded (version 1)
 }
+
+// ExampleCreateSnapshot demonstrates creating a configuration snapshot.
+// Snapshots capture the effective configuration state at a point in time,
+// including provenance information and automatic secret redaction.
+func ExampleCreateSnapshot() {
+	type Config struct {
+		Host     string `conf:"required"`
+		Port     int    `conf:"default:8080"`
+		APIKey   string `conf:"required,secret"`
+		LogLevel string `conf:"default:info"`
+	}
+
+	os.Setenv("EXSNAP_HOST", "api.example.com")
+	os.Setenv("EXSNAP_APIKEY", "super-secret-key-12345")
+	defer func() {
+		os.Unsetenv("EXSNAP_HOST")
+		os.Unsetenv("EXSNAP_APIKEY")
+	}()
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXSNAP_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a snapshot of the loaded configuration
+	snapshot, err := rigging.CreateSnapshot(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Snapshot version: %s\n", snapshot.Version)
+	fmt.Printf("Host: %s\n", snapshot.Config["host"])
+	fmt.Printf("Port: %v\n", snapshot.Config["port"])
+	fmt.Printf("APIKey: %s\n", snapshot.Config["apikey"]) // Secret is redacted
+	fmt.Printf("LogLevel: %s\n", snapshot.Config["loglevel"])
+
+	// Output:
+	// Snapshot version: 1.0
+	// Host: api.example.com
+	// Port: 8080
+	// APIKey: ***redacted***
+	// LogLevel: info
+}
+
+// ExampleCreateSnapshot_withExclusions demonstrates excluding specific fields
+// from a snapshot using WithExcludeFields.
+func ExampleCreateSnapshot_withExclusions() {
+	type Config struct {
+		Host     string `conf:"required"`
+		Port     int    `conf:"default:8080"`
+		Debug    bool   `conf:"default:false"`
+		Internal string `conf:"default:internal-value"`
+	}
+
+	os.Setenv("EXSNAPEX_HOST", "localhost")
+	defer os.Unsetenv("EXSNAPEX_HOST")
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXSNAPEX_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create snapshot excluding specific fields
+	snapshot, err := rigging.CreateSnapshot(cfg,
+		rigging.WithExcludeFields("debug", "internal"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Print all keys in the snapshot config
+	fmt.Printf("Host present: %v\n", snapshot.Config["host"] != nil)
+	fmt.Printf("Port present: %v\n", snapshot.Config["port"] != nil)
+	fmt.Printf("Debug present: %v\n", snapshot.Config["debug"] != nil)
+	fmt.Printf("Internal present: %v\n", snapshot.Config["internal"] != nil)
+
+	// Output:
+	// Host present: true
+	// Port present: true
+	// Debug present: false
+	// Internal present: false
+}
+
+// ExampleWriteSnapshot demonstrates persisting a snapshot to disk.
+// The path supports {{timestamp}} template variable which is expanded
+// using the snapshot's internal timestamp for consistency.
+func ExampleWriteSnapshot() {
+	type Config struct {
+		Host string `conf:"required"`
+		Port int    `conf:"default:8080"`
+	}
+
+	os.Setenv("EXWRITE_HOST", "localhost")
+	defer os.Unsetenv("EXWRITE_HOST")
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXWRITE_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a snapshot
+	snapshot, err := rigging.CreateSnapshot(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a temp directory for the example
+	tmpDir, err := os.MkdirTemp("", "snapshot-example")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write snapshot with timestamp template in path
+	// The {{timestamp}} is replaced with the snapshot's timestamp (e.g., 20240115-103000)
+	path := tmpDir + "/config-{{timestamp}}.json"
+	err = rigging.WriteSnapshot(snapshot, path)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Verify the file was created
+	expectedPath := rigging.ExpandPathWithTime(path, snapshot.Timestamp)
+	if _, statErr := os.Stat(expectedPath); statErr == nil {
+		fmt.Println("Snapshot written successfully")
+	}
+
+	// Read the file to show it's valid JSON
+	readSnapshot, err := rigging.ReadSnapshot(expectedPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Read back version: %s\n", readSnapshot.Version)
+	fmt.Printf("Read back host: %s\n", readSnapshot.Config["host"])
+
+	// Output:
+	// Snapshot written successfully
+	// Read back version: 1.0
+	// Read back host: localhost
+}
+
+// ExampleWriteSnapshot_errorHandling demonstrates error handling when writing snapshots.
+func ExampleWriteSnapshot_errorHandling() {
+	// Attempting to write a nil snapshot returns an error
+	err := rigging.WriteSnapshot(nil, "/tmp/snapshot.json")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
+
+	// Output:
+	// Error: rigging: config is nil
+}
+
+// Example_snapshotRoundTrip demonstrates the complete snapshot lifecycle:
+// Create → Write → Read, showing round-trip consistency.
+func Example_snapshotRoundTrip() {
+	type Config struct {
+		Environment string `conf:"default:production"`
+		Host        string `conf:"required"`
+		Port        int    `conf:"default:443"`
+		APIKey      string `conf:"required,secret"`
+	}
+
+	os.Setenv("EXRT_HOST", "api.example.com")
+	os.Setenv("EXRT_APIKEY", "secret-api-key")
+	defer func() {
+		os.Unsetenv("EXRT_HOST")
+		os.Unsetenv("EXRT_APIKEY")
+	}()
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXRT_"}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Step 1: Create snapshot
+	original, err := rigging.CreateSnapshot(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Step 1: Created snapshot")
+
+	// Step 2: Write to disk
+	tmpDir, err := os.MkdirTemp("", "roundtrip-example")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	path := tmpDir + "/config.json"
+	if writeErr := rigging.WriteSnapshot(original, path); writeErr != nil {
+		log.Fatal(writeErr)
+	}
+	fmt.Println("Step 2: Wrote snapshot to disk")
+
+	// Step 3: Read back from disk
+	restored, err := rigging.ReadSnapshot(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Step 3: Read snapshot from disk")
+
+	// Verify round-trip consistency
+	fmt.Printf("Version matches: %v\n", original.Version == restored.Version)
+	fmt.Printf("Timestamp matches: %v\n", original.Timestamp.Equal(restored.Timestamp))
+	fmt.Printf("Host matches: %v\n", original.Config["host"] == restored.Config["host"])
+	fmt.Printf("Secret still redacted: %v\n", restored.Config["apikey"] == "***redacted***")
+
+	// Output:
+	// Step 1: Created snapshot
+	// Step 2: Wrote snapshot to disk
+	// Step 3: Read snapshot from disk
+	// Version matches: true
+	// Timestamp matches: true
+	// Host matches: true
+	// Secret still redacted: true
+}
