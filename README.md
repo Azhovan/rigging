@@ -71,6 +71,14 @@ for _, field := range prov.Fields {
 // Database.Port from default
 ```
 
+Capture configuration snapshots for debugging across environments:
+
+```go
+snapshot, _ := rigging.CreateSnapshot(cfg)
+rigging.WriteSnapshot(snapshot, "config-{{timestamp}}.json")
+// Creates: config-20240115-103000.json with secrets redacted
+```
+
 ### 3. Policy-Driven Validation
 
 Enforce validation rules at startup. All configuration is validated before your application runs.
