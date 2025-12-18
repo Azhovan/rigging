@@ -117,6 +117,72 @@ rigging.DumpEffective(os.Stdout, cfg,
     rigging.WithIndent("    "))
 ```
 
+## Snapshots
+
+Capture configuration state for debugging and auditing.
+
+### CreateSnapshot
+
+```go
+func CreateSnapshot[T any](cfg *T, opts ...SnapshotOption) (*ConfigSnapshot, error)
+```
+
+Creates a point-in-time capture with flattened config, provenance, and automatic secret redaction.
+
+```go
+snapshot, err := rigging.CreateSnapshot(cfg)
+// snapshot.Config["database.host"] = "localhost"
+// snapshot.Config["database.password"] = "***redacted***"
+```
+
+**Options:**
+- `WithExcludeFields(paths ...string)` - Exclude specific field paths
+
+```go
+snapshot, err := rigging.CreateSnapshot(cfg,
+    rigging.WithExcludeFields("debug", "internal.metrics"))
+```
+
+### WriteSnapshot / ReadSnapshot
+
+```go
+func WriteSnapshot(snapshot *ConfigSnapshot, pathTemplate string) error
+func ReadSnapshot(path string) (*ConfigSnapshot, error)
+```
+
+Persist and restore snapshots with atomic writes and `{{timestamp}}` template support.
+
+```go
+// Write with timestamp in filename
+err := rigging.WriteSnapshot(snapshot, "snapshots/config-{{timestamp}}.json")
+// Creates: snapshots/config-20240115-103000.json
+
+// Read back
+restored, err := rigging.ReadSnapshot("snapshots/config-20240115-103000.json")
+```
+
+### ConfigSnapshot
+
+```go
+type ConfigSnapshot struct {
+    Version    string                 // Format version ("1.0")
+    Timestamp  time.Time              // Creation time
+    Config     map[string]any         // Flattened config (secrets redacted)
+    Provenance []FieldProvenance      // Source tracking
+}
+```
+
+### Constants and Errors
+
+```go
+const MaxSnapshotSize = 100 * 1024 * 1024  // 100MB limit
+const SnapshotVersion = "1.0"
+
+var ErrSnapshotTooLarge    // Snapshot exceeds size limit
+var ErrNilConfig           // Nil config passed
+var ErrUnsupportedVersion  // Unknown snapshot version
+```
+
 ## Error Types
 
 ### ValidationError
