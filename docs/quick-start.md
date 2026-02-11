@@ -1,47 +1,22 @@
 # Quick Start
 
-## Installation
+This guide gets you from zero to a successful load with validation, provenance, and safe dumps.
+
+## 1. Install
 
 ```bash
-# Core library (zero dependencies)
 go get github.com/Azhovan/rigging
-
-# File support (YAML/JSON/TOML)
 go get github.com/Azhovan/rigging/sourcefile
-
-# Environment variables
 go get github.com/Azhovan/rigging/sourceenv
 ```
 
-## Basic Usage
-
-Create `config.yaml`:
-```yaml
-database:
-  host: localhost
-```
-
-Set the required password:
-```bash
-export APP_DATABASE__PASSWORD=secret
-```
+## 2. Define a Typed Schema
 
 ```go
-package main
-
-import (
-    "context"
-    "log"
-
-    "github.com/Azhovan/rigging"
-    "github.com/Azhovan/rigging/sourcefile"
-    "github.com/Azhovan/rigging/sourceenv"
-)
-
 type Config struct {
     Server struct {
-        Port int    `conf:"default:8080"`
         Host string `conf:"default:0.0.0.0"`
+        Port int    `conf:"default:8080,min:1024,max:65535"`
     } `conf:"prefix:server"`
 
     Database struct {
@@ -50,104 +25,106 @@ type Config struct {
         Password string `conf:"required,secret"`
     } `conf:"prefix:database"`
 }
-
-func main() {
-    loader := rigging.NewLoader[Config]().
-        WithSource(sourcefile.New("config.yaml", sourcefile.Options{})).
-        WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"}))
-
-    cfg, err := loader.Load(context.Background())
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Use your configuration
-    log.Printf("Starting server on %s:%d", cfg.Server.Host, cfg.Server.Port)
-}
 ```
 
-## Multi-Source Configuration
+## 3. Provide Inputs
 
-Sources are processed in order. Later sources override earlier ones.
+Create `config.yaml`:
+
+```yaml
+server:
+  host: 0.0.0.0
+database:
+  host: localhost
+```
+
+Set required secret from env:
+
+```bash
+export APP_DATABASE__PASSWORD=secret123
+```
+
+## 4. Load Configuration
 
 ```go
 loader := rigging.NewLoader[Config]().
-    WithSource(sourcefile.New("defaults.yaml", sourcefile.Options{})).  // Base configuration
-    WithSource(sourcefile.New("config.yaml", sourcefile.Options{})).    // Environment-specific
-    WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"}))        // Runtime overrides
+    WithSource(sourcefile.New("config.yaml", sourcefile.Options{})).
+    WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"}))
+
+cfg, err := loader.Load(context.Background())
+if err != nil {
+    log.Fatal(err)
+}
+
+log.Printf("server at %s:%d", cfg.Server.Host, cfg.Server.Port)
 ```
 
-## Validation
+## 5. Observe and Debug Safely
 
-Tag-based validation:
+### Provenance
 
 ```go
-type Config struct {
-    Port        int    `conf:"required,min:1024,max:65535"`
-    Environment string `conf:"required,oneof:prod,staging,dev"`
-    Timeout     time.Duration `conf:"default:30s"`
+prov, ok := rigging.GetProvenance(cfg)
+if ok {
+    for _, field := range prov.Fields {
+        log.Printf("%s <- %s", field.FieldPath, field.SourceName)
+    }
 }
 ```
 
-Custom validation:
+### Redacted dump
+
+```go
+rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
+```
+
+Secrets tagged with `conf:"secret"` are redacted.
+
+## 6. Key Mapping Rules (Important)
+
+Rigging matches using normalized lowercase key paths.
+
+- Field `MaxConnections` maps to key `max_connections`
+- Field `APIKey` maps to key `api_key`
+- Nested fields use dots (`database.host`)
+- `prefix:` prepends nested paths
+- `name:` overrides derived key paths entirely
+
+Environment source normalization:
+- `APP_DATABASE__HOST` -> `database.host`
+- `APP_API_KEY` -> `api_key`
+- single `_` is preserved; double `__` becomes `.`
+
+File source behavior:
+- keys are flattened from file structure and lowercased
+- separators are not rewritten (for example, `max_connections` stays `max_connections`)
+
+If your file keys are snake_case, map explicitly:
+
+```go
+type Config struct {
+    MaxConnections int `conf:"name:max_connections"`
+}
+```
+
+## 7. Fail-Fast Validation
+
+Tag validation and custom validators run during `Load`:
 
 ```go
 loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
-    if cfg.Environment == "prod" && cfg.Server.Host == "localhost" {
-        return errors.New("production cannot use localhost")
+    if cfg.Server.Port == 5432 {
+        return errors.New("server port conflicts with postgres")
     }
     return nil
 }))
 ```
 
-## Observability
+If validation fails, `Load` returns a `*rigging.ValidationError` with all field errors.
 
-Track configuration sources:
+## 8. Next Steps
 
-```go
-cfg, err := loader.Load(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-
-prov, _ := rigging.GetProvenance(cfg)
-for _, field := range prov.Fields {
-    log.Printf("%s from %s", field.FieldPath, field.SourceName)
-}
-```
-
-Dump configuration safely:
-
-```go
-import "os"
-
-// Secrets are automatically redacted
-rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
-
-// Output:
-// server.host: "0.0.0.0" (source: file:config.yaml)
-// server.port: 8080 (source: default)
-// database.host: "localhost" (source: file:config.yaml)
-// database.port: 5432 (source: default)
-// database.password: "***redacted***" (source: env:APP_DATABASE__PASSWORD)
-```
-
-## Optional Fields
-
-Distinguish "not set" from "zero value":
-
-```go
-type Config struct {
-    Timeout rigging.Optional[time.Duration]
-}
-
-cfg, _ := loader.Load(ctx)
-
-if timeout, ok := cfg.Timeout.Get(); ok {
-    // Value was explicitly set
-    client.SetTimeout(timeout)
-} else {
-    // Value not set, use computed default
-    client.SetTimeout(computeDefault())
-}
-```
+- Source layering, watch/reload: [Configuration Sources](configuration-sources.md)
+- Tag strategy and schema patterns: [Configuration Patterns](patterns.md)
+- Full API details: [API Reference](api-reference.md)
+- Runnable demo: [`examples/basic`](../examples/basic)

@@ -66,8 +66,8 @@ func ExampleLoader_Load() {
 		MaxRetries int           `conf:"default:3,min:1,max:10"`
 	}
 
-	os.Setenv("EXLOAD_APIKEY", "test-key-12345")
-	defer os.Unsetenv("EXLOAD_APIKEY")
+	os.Setenv("EXLOAD_API_KEY", "test-key-12345")
+	defer os.Unsetenv("EXLOAD_API_KEY")
 
 	loader := rigging.NewLoader[Config]().
 		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXLOAD_"}))
@@ -131,10 +131,10 @@ func ExampleDumpEffective() {
 		Timeout  time.Duration `conf:"default:30s"`
 	}
 
-	os.Setenv("EXDMPEFF_APIKEY", "super-secret-key")
+	os.Setenv("EXDMPEFF_API_KEY", "super-secret-key")
 	os.Setenv("EXDMPEFF_ENDPOINT", "https://api.example.com")
 	defer func() {
-		os.Unsetenv("EXDMPEFF_APIKEY")
+		os.Unsetenv("EXDMPEFF_API_KEY")
 		os.Unsetenv("EXDMPEFF_ENDPOINT")
 	}()
 
@@ -150,7 +150,7 @@ func ExampleDumpEffective() {
 	rigging.DumpEffective(os.Stdout, cfg)
 
 	// Output:
-	// apikey: ***redacted***
+	// api_key: ***redacted***
 	// endpoint: "https://api.example.com"
 	// timeout: 30s
 }
@@ -456,7 +456,7 @@ func Example_envCaseSensitive() {
 }
 
 // Example_underscoreNormalization demonstrates how underscores in environment
-// variables are normalized to match camelCase field names.
+// variables are normalized to match snake_case-derived field keys.
 func Example_underscoreNormalization() {
 	type Config struct {
 		MaxConnections int
@@ -464,7 +464,7 @@ func Example_underscoreNormalization() {
 	}
 
 	// All these environment variable formats match the same fields:
-	// - Single underscores are stripped for flexible matching
+	// - Single underscores are preserved
 	// - Double underscores (__) create nested structures
 	// - Everything is case-insensitive
 
@@ -604,10 +604,10 @@ func ExampleCreateSnapshot() {
 	}
 
 	os.Setenv("EXSNAP_HOST", "api.example.com")
-	os.Setenv("EXSNAP_APIKEY", "super-secret-key-12345")
+	os.Setenv("EXSNAP_API_KEY", "super-secret-key-12345")
 	defer func() {
 		os.Unsetenv("EXSNAP_HOST")
-		os.Unsetenv("EXSNAP_APIKEY")
+		os.Unsetenv("EXSNAP_API_KEY")
 	}()
 
 	loader := rigging.NewLoader[Config]().
@@ -627,8 +627,8 @@ func ExampleCreateSnapshot() {
 	fmt.Printf("Snapshot version: %s\n", snapshot.Version)
 	fmt.Printf("Host: %s\n", snapshot.Config["host"])
 	fmt.Printf("Port: %v\n", snapshot.Config["port"])
-	fmt.Printf("APIKey: %s\n", snapshot.Config["apikey"]) // Secret is redacted
-	fmt.Printf("LogLevel: %s\n", snapshot.Config["loglevel"])
+	fmt.Printf("APIKey: %s\n", snapshot.Config["api_key"]) // Secret is redacted
+	fmt.Printf("LogLevel: %s\n", snapshot.Config["log_level"])
 
 	// Output:
 	// Snapshot version: 1.0
@@ -764,10 +764,10 @@ func Example_snapshotRoundTrip() {
 	}
 
 	os.Setenv("EXRT_HOST", "api.example.com")
-	os.Setenv("EXRT_APIKEY", "secret-api-key")
+	os.Setenv("EXRT_API_KEY", "secret-api-key")
 	defer func() {
 		os.Unsetenv("EXRT_HOST")
-		os.Unsetenv("EXRT_APIKEY")
+		os.Unsetenv("EXRT_API_KEY")
 	}()
 
 	loader := rigging.NewLoader[Config]().
@@ -809,7 +809,7 @@ func Example_snapshotRoundTrip() {
 	fmt.Printf("Version matches: %v\n", original.Version == restored.Version)
 	fmt.Printf("Timestamp matches: %v\n", original.Timestamp.Equal(restored.Timestamp))
 	fmt.Printf("Host matches: %v\n", original.Config["host"] == restored.Config["host"])
-	fmt.Printf("Secret still redacted: %v\n", restored.Config["apikey"] == "***redacted***")
+	fmt.Printf("Secret still redacted: %v\n", restored.Config["api_key"] == "***redacted***")
 
 	// Output:
 	// Step 1: Created snapshot

@@ -16,14 +16,14 @@ func TestToLowerDotPath(t *testing.T) {
 			expected: "foo.bar",
 		},
 		{
-			name:     "single underscore stripped",
+			name:     "single underscore preserved",
 			input:    "DB_MAX_CONNECTIONS",
-			expected: "dbmaxconnections",
+			expected: "db_max_connections",
 		},
 		{
 			name:     "mixed double and single underscores",
 			input:    "API__RATE_LIMIT",
-			expected: "api.ratelimit",
+			expected: "api.rate_limit",
 		},
 		{
 			name:     "multiple levels",
@@ -46,14 +46,14 @@ func TestToLowerDotPath(t *testing.T) {
 			expected: "..",
 		},
 		{
-			name:     "max_connections should match maxconnections",
+			name:     "max_connections stays max_connections",
 			input:    "max_connections",
-			expected: "maxconnections",
+			expected: "max_connections",
 		},
 		{
-			name:     "MAX_CONNECTIONS should match maxconnections",
+			name:     "MAX_CONNECTIONS should normalize to max_connections",
 			input:    "MAX_CONNECTIONS",
-			expected: "maxconnections",
+			expected: "max_connections",
 		},
 	}
 
@@ -86,7 +86,7 @@ func TestDeriveFieldPath(t *testing.T) {
 		{
 			name:      "camelCase field",
 			fieldName: "APIKey",
-			expected:  "aPIKey",
+			expected:  "api_key",
 		},
 		{
 			name:      "already lowercase first letter",
@@ -101,7 +101,17 @@ func TestDeriveFieldPath(t *testing.T) {
 		{
 			name:      "multi-word field",
 			fieldName: "MaxConnections",
-			expected:  "maxConnections",
+			expected:  "max_connections",
+		},
+		{
+			name:      "acronym boundary",
+			fieldName: "HTTPServer",
+			expected:  "http_server",
+		},
+		{
+			name:      "mixed acronym and suffix",
+			fieldName: "MyURLParser",
+			expected:  "my_url_parser",
 		},
 	}
 

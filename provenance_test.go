@@ -119,6 +119,29 @@ func TestProvenance_StoreAndDelete(t *testing.T) {
 	}
 }
 
+func TestReleaseProvenance(t *testing.T) {
+	type TestConfig struct {
+		Value string
+	}
+
+	cfg := &TestConfig{Value: "test"}
+	prov := &Provenance{
+		Fields: []FieldProvenance{
+			{FieldPath: "Value", KeyPath: "value", SourceName: "env"},
+		},
+	}
+
+	storeProvenance(cfg, prov)
+	if _, ok := GetProvenance(cfg); !ok {
+		t.Fatal("expected stored provenance")
+	}
+
+	ReleaseProvenance(cfg)
+	if _, ok := GetProvenance(cfg); ok {
+		t.Fatal("expected provenance to be released")
+	}
+}
+
 func TestProvenance_SecretField(t *testing.T) {
 	type TestConfig struct {
 		Password string
@@ -506,12 +529,12 @@ func TestProvenance_NestedStructs(t *testing.T) {
 	source := &mockSourceWithKeys{
 		name: "env:APP_",
 		data: map[string]any{
-			"appname":     "myapp",
+			"app_name":    "myapp",
 			"db.host":     "dbhost",
 			"db.password": "dbpass",
 		},
 		originalKeys: map[string]string{
-			"appname":     "APP_APPNAME",
+			"app_name":    "APP_APP_NAME",
 			"db.host":     "APP_DB__HOST",
 			"db.password": "APP_DB__PASSWORD",
 		},
@@ -537,7 +560,7 @@ func TestProvenance_NestedStructs(t *testing.T) {
 
 	// Verify sources
 	expectedSources := map[string]string{
-		"AppName":           "env:APP_APPNAME",
+		"AppName":           "env:APP_APP_NAME",
 		"Database.Host":     "env:APP_DB__HOST",
 		"Database.Port":     "default",
 		"Database.Password": "env:APP_DB__PASSWORD",

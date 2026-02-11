@@ -44,3 +44,9 @@ func deleteProvenance[T any](cfg *T) {
 		provenanceStore.Delete(cfg)
 	}
 }
+
+// ReleaseProvenance removes stored provenance for a config instance.
+// Use this in long-lived processes once provenance is no longer needed.
+func ReleaseProvenance[T any](cfg *T) {
+	deleteProvenance(cfg)
+}

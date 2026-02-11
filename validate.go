@@ -77,15 +77,10 @@ func validateStructRecursive(cfg reflect.Value, parentFieldPath string) []FieldE
 
 	cfgType := cfg.Type()
 
-	// Walk through all fields
-	for i := 0; i < cfg.NumField(); i++ {
-		field := cfgType.Field(i)
-		fieldValue := cfg.Field(i)
-
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
+	// Walk through exported fields using cached metadata.
+	for _, meta := range getStructFieldMeta(cfgType) {
+		field := meta.field
+		fieldValue := cfg.Field(meta.index)
 
 		// Build field path
 		fieldPath := field.Name
@@ -93,9 +88,7 @@ func validateStructRecursive(cfg reflect.Value, parentFieldPath string) []FieldE
 			fieldPath = parentFieldPath + "." + field.Name
 		}
 
-		// Parse struct tag
-		tag := field.Tag.Get("conf")
-		tagCfg := parseTag(tag)
+		tagCfg := meta.tagCfg
 
 		// Handle Optional[T] types - validate the inner value if set
 		if isOptionalType(fieldValue.Type()) {

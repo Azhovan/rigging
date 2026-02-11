@@ -100,6 +100,35 @@ func TestDumpEffective_WithSources(t *testing.T) {
 	}
 }
 
+func TestDumpEffective_RedactsSecretsWithoutProvenance(t *testing.T) {
+	type Config struct {
+		APIKey string `conf:"secret"`
+		Host   string
+	}
+
+	cfg := &Config{
+		APIKey: "super-secret",
+		Host:   "localhost",
+	}
+
+	// Ensure no provenance is available.
+	ReleaseProvenance(cfg)
+
+	var buf bytes.Buffer
+	err := DumpEffective(&buf, cfg)
+	if err != nil {
+		t.Fatalf("DumpEffective failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "api_key: ***redacted***") {
+		t.Errorf("expected api_key to be redacted, got: %s", output)
+	}
+	if strings.Contains(output, "super-secret") {
+		t.Errorf("secret should never appear in dump output: %s", output)
+	}
+}
+
 func TestDumpEffective_JSONFormat(t *testing.T) {
 	type Config struct {
 		Host     string `conf:"name:host"`
@@ -273,6 +302,117 @@ func TestDumpEffective_JSONNestedStructs(t *testing.T) {
 	if database["password"] != "***redacted***" {
 		t.Errorf("Expected database.password to be redacted, got: %v", database["password"])
 	}
+}
+
+func TestDumpEffective_InheritedSecretRedaction_NestedLeaves(t *testing.T) {
+	type Auth struct {
+		APIKey string
+		Secret string
+	}
+
+	type Credentials struct {
+		Username string
+		Password string
+		Auth     Auth
+	}
+
+	type Config struct {
+		Credentials Credentials `conf:"prefix:credentials,secret"`
+		PublicHost  string
+	}
+
+	cfg := &Config{
+		Credentials: Credentials{
+			Username: "alice",
+			Password: "p@ssw0rd",
+			Auth: Auth{
+				APIKey: "api-key-123",
+				Secret: "auth-secret-456",
+			},
+		},
+		PublicHost: "example.com",
+	}
+
+	t.Run("text output redacts all nested leaves", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DumpEffective(&buf, cfg); err != nil {
+			t.Fatalf("DumpEffective failed: %v", err)
+		}
+
+		output := buf.String()
+
+		// Nested leaves under Credentials should all be redacted due to inherited secret.
+		if !strings.Contains(output, "credentials.username: ***redacted***") {
+			t.Errorf("expected credentials.username to be redacted, got: %s", output)
+		}
+		if !strings.Contains(output, "credentials.password: ***redacted***") {
+			t.Errorf("expected credentials.password to be redacted, got: %s", output)
+		}
+		if !strings.Contains(output, "credentials.auth.api_key: ***redacted***") {
+			t.Errorf("expected credentials.auth.api_key to be redacted, got: %s", output)
+		}
+		if !strings.Contains(output, "credentials.auth.secret: ***redacted***") {
+			t.Errorf("expected credentials.auth.secret to be redacted, got: %s", output)
+		}
+
+		// Non-secret sibling field should remain visible.
+		if !strings.Contains(output, `public_host: "example.com"`) {
+			t.Errorf("expected public_host to remain visible, got: %s", output)
+		}
+
+		// Ensure no raw secret values leak.
+		for _, leaked := range []string{"alice", "p@ssw0rd", "api-key-123", "auth-secret-456"} {
+			if strings.Contains(output, leaked) {
+				t.Errorf("found leaked secret value %q in output: %s", leaked, output)
+			}
+		}
+	})
+
+	t.Run("json output redacts all nested leaves", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DumpEffective(&buf, cfg, AsJSON()); err != nil {
+			t.Fatalf("DumpEffective failed: %v", err)
+		}
+
+		var result map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+			t.Fatalf("failed to parse JSON output: %v", err)
+		}
+
+		credentials, ok := result["credentials"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected credentials to be a map, got %T", result["credentials"])
+		}
+
+		if credentials["username"] != "***redacted***" {
+			t.Errorf("expected credentials.username redacted, got: %v", credentials["username"])
+		}
+		if credentials["password"] != "***redacted***" {
+			t.Errorf("expected credentials.password redacted, got: %v", credentials["password"])
+		}
+
+		auth, ok := credentials["auth"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected credentials.auth to be a map, got %T", credentials["auth"])
+		}
+		if auth["api_key"] != "***redacted***" {
+			t.Errorf("expected credentials.auth.api_key redacted, got: %v", auth["api_key"])
+		}
+		if auth["secret"] != "***redacted***" {
+			t.Errorf("expected credentials.auth.secret redacted, got: %v", auth["secret"])
+		}
+
+		if result["public_host"] != "example.com" {
+			t.Errorf("expected public_host to remain visible, got: %v", result["public_host"])
+		}
+
+		rawJSON := buf.String()
+		for _, leaked := range []string{"alice", "p@ssw0rd", "api-key-123", "auth-secret-456"} {
+			if strings.Contains(rawJSON, leaked) {
+				t.Errorf("found leaked secret value %q in JSON output: %s", leaked, rawJSON)
+			}
+		}
+	})
 }
 
 func TestDumpEffective_OptionalFields(t *testing.T) {

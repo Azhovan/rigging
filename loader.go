@@ -48,6 +48,17 @@ func (l *Loader[T]) Strict(strict bool) *Loader[T] {
 // Load loads, merges, binds, and validates configuration from all sources.
 // Returns populated config or ValidationError with all field errors.
 func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
+	cfg, _, err := l.loadInternal(ctx, true)
+	return cfg, err
+}
+
+// LoadWithProvenance loads configuration and returns field provenance explicitly.
+// Unlike Load, it does not store provenance in the global provenance map.
+func (l *Loader[T]) LoadWithProvenance(ctx context.Context) (*T, *Provenance, error) {
+	return l.loadInternal(ctx, false)
+}
+
+func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenance, error) {
 	// Step 1: Load from all sources and merge
 	mergedData := make(map[string]mergedEntry)
 
@@ -65,7 +76,7 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("load source %s: %w", source.Name(), err)
+			return nil, nil, fmt.Errorf("load source %s: %w", source.Name(), err)
 		}
 
 		// Merge data into mergedData map
@@ -114,7 +125,7 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 		}
 
 		if len(unknownKeyErrors) > 0 {
-			return nil, &ValidationError{FieldErrors: unknownKeyErrors}
+			return nil, nil, &ValidationError{FieldErrors: unknownKeyErrors}
 		}
 	}
 
@@ -141,21 +152,24 @@ func (l *Loader[T]) Load(ctx context.Context) (*T, error) {
 				allErrors = append(allErrors, valErr.FieldErrors...)
 			} else {
 				// Wrap other errors as validation errors
-				return nil, fmt.Errorf("validator %d failed: %w", i, err)
+				return nil, nil, fmt.Errorf("validator %d failed: %w", i, err)
 			}
 		}
 	}
 
 	// Step 7: Return error if any validation failed
 	if len(allErrors) > 0 {
-		return nil, &ValidationError{FieldErrors: allErrors}
+		return nil, nil, &ValidationError{FieldErrors: allErrors}
 	}
 
-	// Step 8: Store provenance for the config instance
-	storeProvenance(cfg, &Provenance{Fields: provenanceFields})
+	// Step 8: Build provenance for the config instance
+	prov := &Provenance{Fields: provenanceFields}
+	if store {
+		storeProvenance(cfg, prov)
+	}
 
 	// Step 9: Return the loaded configuration
-	return cfg, nil
+	return cfg, prov, nil
 }
 
 // Watch monitors sources for changes and auto-reloads configuration.
@@ -193,18 +207,10 @@ func collectValidKeys(t reflect.Type, prefix string) map[string]bool {
 		return validKeys
 	}
 
-	// Walk through all fields
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
-
-		// Parse struct tag
-		tag := field.Tag.Get("conf")
-		tagCfg := parseTag(tag)
+	// Walk through cached exported field metadata.
+	for _, meta := range getStructFieldMeta(t) {
+		field := meta.field
+		tagCfg := meta.tagCfg
 
 		// Determine key path
 		keyPath := determineKeyPath(field.Name, tagCfg, prefix)

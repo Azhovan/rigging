@@ -16,6 +16,7 @@ loader := rigging.NewLoader[Config]()
 - `WithValidator(v Validator[T]) *Loader[T]` - Add a custom validator
 - `Strict(strict bool) *Loader[T]` - Enable/disable strict mode
 - `Load(ctx context.Context) (*T, error)` - Load and validate configuration
+- `LoadWithProvenance(ctx context.Context) (*T, *Provenance, error)` - Load config and return provenance without using global storage
 - `Watch(ctx context.Context) (<-chan Snapshot[T], <-chan error, error)` - Watch for changes
 
 ### Source
@@ -26,12 +27,15 @@ Interface for configuration sources.
 type Source interface {
     Load(ctx context.Context) (map[string]any, error)
     Watch(ctx context.Context) (<-chan ChangeEvent, error)
+    Name() string
 }
 ```
 
 **Built-in sources:**
 - `sourcefile.New(path string, opts sourcefile.Options)` - YAML/JSON/TOML files
 - `sourceenv.New(opts sourceenv.Options)` - Environment variables
+
+`Name()` is used in provenance output (for example, `file:config.yaml`, `env:APP_PORT`).
 
 ### Optional[T]
 
@@ -71,7 +75,12 @@ Track where configuration values came from.
 func GetProvenance[T any](cfg *T) (*Provenance, bool)
 ```
 
+```go
+func ReleaseProvenance[T any](cfg *T)
+```
+
 Returns provenance metadata with field-level source information.
+`ReleaseProvenance` removes stored provenance for a config instance.
 
 ```go
 type Provenance struct {
@@ -244,7 +253,8 @@ type Config struct {
 
 - `name:` overrides all key derivation (ignores `prefix:` and field name)
 - `prefix:` applies to nested struct fields
-- Without `name:`, keys are derived from field names (lowercased first letter)
+- Without `name:`, keys are derived from field names (snake_case)
+- Environment normalization converts `__` to `.` and preserves single `_` (after prefix stripping)
 
 ```go
 type Config struct {

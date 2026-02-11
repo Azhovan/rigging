@@ -257,6 +257,29 @@ func TestFlattenConfig_NoProvenance(t *testing.T) {
 	}
 }
 
+func TestFlattenConfig_SecretRedactionWithoutProvenance(t *testing.T) {
+	type Config struct {
+		Token string `conf:"secret"`
+		Host  string
+	}
+
+	cfg := &Config{
+		Token: "token-123",
+		Host:  "localhost",
+	}
+
+	// Ensure no provenance is available.
+	ReleaseProvenance(cfg)
+
+	result := flattenConfig(cfg)
+	if result["token"] != "***redacted***" {
+		t.Errorf("expected token to be redacted, got: %v", result["token"])
+	}
+	if result["host"] != "localhost" {
+		t.Errorf("expected host to remain visible, got: %v", result["host"])
+	}
+}
+
 func TestFlattenConfig_DeeplyNested(t *testing.T) {
 	type Inner struct {
 		Value string `conf:"name:value"`
