@@ -659,6 +659,27 @@ func TestBinding_ParseTag(t *testing.T) {
 	}
 }
 
+func TestBinding_ParseTag_CacheIsolationForOneofSlice(t *testing.T) {
+	tag := "oneof:gamma,beta,alpha,required"
+
+	first := parseTag(tag)
+	if !reflect.DeepEqual(first.oneof, []string{"alpha", "beta", "gamma"}) {
+		t.Fatalf("unexpected initial oneof: %v", first.oneof)
+	}
+
+	// Mutate the caller-owned result; this must not affect cached values.
+	first.oneof[0] = "mutated"
+	first.oneof = append(first.oneof, "delta")
+
+	second := parseTag(tag)
+	if !reflect.DeepEqual(second.oneof, []string{"alpha", "beta", "gamma"}) {
+		t.Fatalf("cache was mutated through returned slice: got %v", second.oneof)
+	}
+	if !second.required {
+		t.Fatalf("expected required=true on cached parse result")
+	}
+}
+
 func TestBinding_ConvertValue(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1209,7 +1230,7 @@ func TestBinding_DetermineKeyPath(t *testing.T) {
 			fieldName:    "VeryLongFieldNameThatShouldStillWork",
 			tagCfg:       tagConfig{},
 			parentPrefix: "",
-			expected:     "verylongfieldnamethatshouldstillwork",
+			expected:     "very_long_field_name_that_should_still_work",
 		},
 
 		// With parent prefix
@@ -1318,7 +1339,7 @@ func TestBinding_DetermineKeyPath(t *testing.T) {
 			fieldName:    "HTTPPort",
 			tagCfg:       tagConfig{},
 			parentPrefix: "",
-			expected:     "httpport",
+			expected:     "http_port",
 		},
 		{
 			name:         "all caps field name",
@@ -1332,7 +1353,7 @@ func TestBinding_DetermineKeyPath(t *testing.T) {
 			fieldName:    "APIKey",
 			tagCfg:       tagConfig{},
 			parentPrefix: "auth",
-			expected:     "auth.apikey",
+			expected:     "auth.api_key",
 		},
 		{
 			name:         "all caps with prefix",

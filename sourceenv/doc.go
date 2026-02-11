@@ -1,6 +1,9 @@
 // Package sourceenv loads configuration from environment variables.
 //
-// Key normalization: FOO__BAR → foo.bar, FOO_BAR → foo_bar
+// Key normalization:
+//   - FOO__BAR -> foo.bar
+//   - FOO_BAR -> foo_bar
+//   - MY__SERVICE__API_KEY -> my.service.api_key
 //
 // Example:
 //

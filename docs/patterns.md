@@ -1,134 +1,111 @@
 # Configuration Patterns
 
-## Core Concepts
+This page focuses on practical schema choices for production services.
 
-### Struct Tags
-
-Control binding and validation with struct tags:
+## 1. Organize by Domain
 
 ```go
-type Config struct {
-    // Required field
-    ApiKey string `conf:"required"`
-
-    // Default value
-    Port int `conf:"default:8080"`
-
-    // Validation constraints
-    MaxConns int `conf:"min:1,max:100"`
-
-    // Allowed values (duplicates removed, empty values ignored)
-    Environment string `conf:"oneof:prod,staging,dev"`
-
-    // Secret (auto-redacted)
-    Password string `conf:"secret"`
-
-    // Nested with prefix
-    Database DatabaseConfig `conf:"prefix:database"`
-}
-```
-
-### Source Precedence
-
-Sources are processed in order, later sources override earlier ones:
-
-```go
-loader := rigging.NewLoader[Config]().
-    WithSource(source1).  // Base layer
-    WithSource(source2).  // Overrides source1
-    WithSource(source3)   // Overrides source2
-```
-
-Common pattern:
-1. Defaults (hardcoded or file)
-2. Environment-specific file (dev.yaml, prod.yaml)
-3. Environment variables (for secrets and overrides)
-
-### Validation Order
-
-1. **Type conversion**: String → target type
-2. **Tag validation**: required, min, max, oneof
-3. **Custom validators**: Your business rules
-
-All errors are collected and returned together.
-
-## Best Practices
-
-### Organize with Nested Structs
-
-```go
-// Good: Clear schema
 type Config struct {
     Server   ServerConfig   `conf:"prefix:server"`
     Database DatabaseConfig `conf:"prefix:database"`
-}
-
-// Avoid: Flat structure
-type Config struct {
-    ServerPort int
-    ServerHost string
-    DatabaseHost string
-    DatabasePort int
-    // ... 50 more fields
+    Logging  LoggingConfig  `conf:"prefix:logging"`
 }
 ```
 
-### Field Naming
+Avoid large flat config structs. Grouping makes validation, ownership, and evolution easier.
 
-Use idiomatic Go names - keys are automatically normalized:
+## 2. Use Explicit Source Layers
+
+```go
+loader := rigging.NewLoader[Config]().
+    WithSource(sourcefile.New("defaults.yaml", sourcefile.Options{})).
+    WithSource(sourcefile.New("env.yaml", sourcefile.Options{})).
+    WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"}))
+```
+
+Recommended order:
+1. defaults
+2. environment file
+3. env overrides (especially secrets)
+
+## 3. Choose a Key Strategy Early
+
+Default derived keys are snake_case field names.
 
 ```go
 type Config struct {
-    MaxConnections int           // Matches: maxconnections
-    APIKey         string         // Matches: apikey
-    RetryTimeout   time.Duration  // Matches: retrytimeout
+    MaxConnections int // key: max_connections
+    APIKey         string // key: api_key
 }
 ```
 
-**Key normalization**: All keys are fully lowercased for matching. Field name `MaxConnections` automatically matches config key `maxconnections`, `MAXCONNECTIONS`, or `max_connections` (after normalization). Use `name:` tag only when you need a different key path:
+If your source keys use snake_case or custom paths, map explicitly:
 
 ```go
 type Config struct {
-    MaxConnections int `conf:"name:max.connections"` // Matches: max.connections
+    MaxConnections int `conf:"name:max_connections"`
+    APIKey         string `conf:"name:api.key"`
 }
 ```
 
-### Handling Secrets
+## 4. Validate at Startup, Not Mid-Request
 
 ```go
-// Good: Secrets marked
 type Config struct {
-    Password string `conf:"secret"`
-    ApiKey   string `conf:"secret"`
+    Port int `conf:"required,min:1024,max:65535"`
+    Env  string `conf:"required,oneof:prod,staging,dev"`
 }
-```
 
-### Startup Validation
-
-```go
-// ✓ Good: Validate at startup
-func main() {
-    cfg, err := loader.Load(ctx)
-    if err != nil {
-        log.Fatal(err)  // Fail fast
+loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
+    if cfg.Env == "prod" && cfg.Port == 8080 {
+        return errors.New("prod must not use default dev port")
     }
+    return nil
+}))
+```
 
-    // Config guaranteed valid
-    startServer(cfg)
+Treat config load as a startup gate.
+
+## 5. Mark and Handle Secrets Explicitly
+
+```go
+type Config struct {
+    DatabasePassword string `conf:"required,secret"`
+    APIKey           string `conf:"required,secret"`
 }
 ```
 
-### Production Logging
+Then use safe outputs:
 
 ```go
-// ✓ Good: Log configuration sources at startup
-cfg, _ := loader.Load(ctx)
+rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
+snapshot, _ := rigging.CreateSnapshot(cfg)
+```
+
+Secrets are redacted in dump/snapshot outputs.
+
+## 6. Use Provenance During Incident Response
+
+```go
 prov, _ := rigging.GetProvenance(cfg)
-
-log.Info("Configuration loaded:")
 for _, field := range prov.Fields {
-    if !field.Secret {
-        log.Infof("  %s from %s", field.FieldPath, field.SourceName)
-    }
+    log.Printf("%s <- %s", field.FieldPath, field.SourceName)
 }
+```
+
+This quickly answers "why is this value set?" without guesswork.
+
+## 7. Provenance Lifecycle for Long-Lived Processes
+
+If you do not want global provenance retention:
+
+```go
+cfg, prov, err := loader.LoadWithProvenance(ctx)
+_ = prov // pass to telemetry/logs
+```
+
+Or release after use:
+
+```go
+rigging.ReleaseProvenance(cfg)
 ```

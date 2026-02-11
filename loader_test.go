@@ -459,6 +459,45 @@ func TestLoad_Provenance(t *testing.T) {
 	}
 }
 
+func TestLoadWithProvenance(t *testing.T) {
+	type Config struct {
+		Host     string
+		Password string `conf:"secret"`
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"host":     "localhost",
+			"password": "secret123",
+		},
+	}
+
+	loader := NewLoader[Config]().WithSource(source)
+	cfg, prov, err := loader.LoadWithProvenance(context.Background())
+	if err != nil {
+		t.Fatalf("LoadWithProvenance failed: %v", err)
+	}
+
+	if cfg.Host != "localhost" {
+		t.Errorf("expected Host=localhost, got %s", cfg.Host)
+	}
+	if cfg.Password != "secret123" {
+		t.Errorf("expected Password=secret123, got %s", cfg.Password)
+	}
+
+	if prov == nil {
+		t.Fatal("expected provenance to be returned")
+	}
+	if len(prov.Fields) != 2 {
+		t.Fatalf("expected 2 provenance fields, got %d", len(prov.Fields))
+	}
+
+	// LoadWithProvenance should not populate the global provenance store.
+	if _, ok := GetProvenance(cfg); ok {
+		t.Fatal("expected no global provenance entry for LoadWithProvenance")
+	}
+}
+
 // TestLoad_NestedStruct verifies that nested structs are bound correctly.
 func TestLoad_NestedStruct(t *testing.T) {
 	type Database struct {
@@ -1483,8 +1522,8 @@ func TestCollectValidKeys_CaseSensitivity(t *testing.T) {
 
 	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
 
-	// All keys should be lowercase
-	expectedKeys := []string{"httpport", "apikey", "dbhost", "username"}
+	// All keys should be lowercase snake_case
+	expectedKeys := []string{"http_port", "api_key", "db_host", "user_name"}
 	if len(validKeys) != len(expectedKeys) {
 		t.Fatalf("expected %d keys, got %d: %v", len(expectedKeys), len(validKeys), validKeys)
 	}
@@ -1564,17 +1603,17 @@ func TestCollectValidKeys_MixedFieldTypes(t *testing.T) {
 	validKeys := collectValidKeys(reflect.TypeOf(Config{}), "")
 
 	expectedKeys := []string{
-		"stringfield",
-		"intfield",
-		"boolfield",
-		"floatfield",
-		"slicefield",
-		"mapfield",
-		"pointerfield",
-		"structfield",
+		"string_field",
+		"int_field",
+		"bool_field",
+		"float_field",
+		"slice_field",
+		"map_field",
+		"pointer_field",
+		"struct_field",
 		"nested.value",
-		"timefield",
-		"durationfield",
+		"time_field",
+		"duration_field",
 	}
 
 	if len(validKeys) != len(expectedKeys) {

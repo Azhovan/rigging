@@ -6,7 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Azhovan/rigging/internal/normalize"
 )
 
 // tagConfig holds parsed directives from a struct field's `conf` tag.
@@ -23,6 +26,17 @@ type tagConfig struct {
 	hasDefault bool     // Whether a default directive was present
 }
 
+var tagConfigCache sync.Map
+
+func cloneTagConfig(cfg tagConfig) tagConfig {
+	if len(cfg.oneof) == 0 {
+		return cfg
+	}
+
+	cfg.oneof = append([]string(nil), cfg.oneof...)
+	return cfg
+}
+
 // parseTag parses a `conf` struct tag into a structured tagConfig.
 // Tag format: "directive1:value1,directive2:value2,..."
 // Boolean directives can omit `:true` (e.g., "required" == "required:true")
@@ -31,6 +45,12 @@ func parseTag(tag string) tagConfig {
 
 	if tag == "" {
 		return cfg
+	}
+
+	if cached, ok := tagConfigCache.Load(tag); ok {
+		if parsed, ok := cached.(tagConfig); ok {
+			return cloneTagConfig(parsed)
+		}
 	}
 
 	directives := extractTagDirectives(tag)
@@ -106,7 +126,8 @@ func parseTag(tag string) tagConfig {
 		}
 	}
 
-	return cfg
+	tagConfigCache.Store(tag, cloneTagConfig(cfg))
+	return cloneTagConfig(cfg)
 }
 
 // extractTagDirectives extracts individual directives from a tag string.
@@ -215,7 +236,7 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 	}
 
 	// Handle time.Time specially before generic struct handling
-	if targetType == reflect.TypeOf(time.Time{}) {
+	if targetType == timeType {
 		switch v := rawValue.(type) {
 		case string:
 			// Try multiple common time formats
@@ -301,7 +322,7 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 
 	case reflect.Int64:
 		// Special case: time.Duration is an int64
-		if targetType == reflect.TypeOf(time.Duration(0)) {
+		if targetType == durationType {
 			duration, err := time.ParseDuration(strValue)
 			if err != nil {
 				return nil, fmt.Errorf("cannot convert %q to time.Duration: %w", strValue, err)
@@ -445,19 +466,11 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 
 	targetType := target.Type()
 
-	// Walk through all fields
-	for i := 0; i < target.NumField(); i++ {
-		field := targetType.Field(i)
-		fieldValue := target.Field(i)
-
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
-
-		// Parse struct tag
-		tag := field.Tag.Get("conf")
-		tagCfg := parseTag(tag)
+	// Walk through exported fields using cached metadata.
+	for _, meta := range getStructFieldMeta(targetType) {
+		field := meta.field
+		fieldValue := target.Field(meta.index)
+		tagCfg := meta.tagCfg
 
 		// Determine the field path for provenance (e.g., "Database.Host")
 		fieldPath := field.Name
@@ -468,94 +481,112 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 		// Determine the key path for lookup
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
 
-		// Handle nested structs with prefix
-		if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
-			// Recursively bind nested struct with new prefix
-			nestedErrors := bindStruct(fieldValue, data, provenanceFields, tagCfg.prefix, fieldPath)
+		if handled, nestedErrors := tryBindNestedField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields); handled {
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
 
-		// Handle nested structs (non-prefix case) - check this before looking up values
-		// because nested structs might not have a direct value in the data map
-		if fieldValue.Kind() == reflect.Struct && !isOptionalType(fieldValue.Type()) && fieldValue.Type() != reflect.TypeOf(time.Time{}) && fieldValue.Type() != reflect.TypeOf(time.Duration(0)) {
-			// Look up value in data map to see if there's a direct map value
-			entry, found := data[keyPath]
-
-			// Check if rawValue is a map (from file sources)
-			if found && entry.value != nil {
-				if rawMap, ok := entry.value.(map[string]any); ok {
-					// Convert map entries to mergedEntry format
-					nestedData := make(map[string]mergedEntry)
-					for k, v := range rawMap {
-						nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
-					}
-					nestedErrors := bindStruct(fieldValue, nestedData, provenanceFields, "", fieldPath)
-					fieldErrors = append(fieldErrors, nestedErrors...)
-					continue
-				}
-			}
-			// Otherwise, try recursive binding with current data and prefix
-			// This handles the case where nested fields are flattened with dot notation
-			nestedErrors := bindStruct(fieldValue, data, provenanceFields, keyPath, fieldPath)
-			fieldErrors = append(fieldErrors, nestedErrors...)
-			continue
-		}
-
-		// Look up value in data map
-		entry, found := data[keyPath]
-		var rawValue any
-		var sourceName string
-
-		if found {
-			rawValue = entry.value
-			sourceName = entry.sourceName
-		} else if tagCfg.hasDefault {
-			// Apply default value
-			rawValue = tagCfg.defValue
-			sourceName = "default"
-		}
-
-		// If no value found and no default, leave as zero value
-		// The validation phase will check if the field is required
-		if !found && !tagCfg.hasDefault {
-			continue
-		}
-
-		// Convert value to target type
-		convertedValue, err := convertValue(rawValue, fieldValue.Type())
-		if err != nil {
-			fieldErrors = append(fieldErrors, FieldError{
-				FieldPath: fieldPath,
-				Code:      ErrCodeInvalidType,
-				Message:   fmt.Sprintf("type conversion failed: %v", err),
-			})
-			continue
-		}
-
-		// Set field value
-		if fieldValue.CanSet() {
-			fieldValue.Set(reflect.ValueOf(convertedValue))
-
-			// Record provenance
-			if provenanceFields != nil {
-				// Use sourceKey from entry if available, otherwise use sourceName
-				sourceInfo := sourceName
-				if found && entry.sourceKey != "" {
-					sourceInfo = entry.sourceKey
-				}
-
-				*provenanceFields = append(*provenanceFields, FieldProvenance{
-					FieldPath:  fieldPath,
-					KeyPath:    keyPath,
-					SourceName: sourceInfo,
-					Secret:     tagCfg.secret,
-				})
-			}
-		}
+		fieldErrors = append(fieldErrors, bindScalarField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields)...)
 	}
 
 	return fieldErrors
+}
+
+func tryBindNestedField(
+	fieldValue reflect.Value,
+	tagCfg tagConfig,
+	keyPath string,
+	fieldPath string,
+	data map[string]mergedEntry,
+	provenanceFields *[]FieldProvenance,
+) (bool, []FieldError) {
+	// Handle nested structs with explicit prefix first.
+	if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
+		return true, bindStruct(fieldValue, data, provenanceFields, tagCfg.prefix, fieldPath)
+	}
+
+	// Handle regular nested structs (excluding Optional/time primitives).
+	if fieldValue.Kind() != reflect.Struct ||
+		isOptionalType(fieldValue.Type()) ||
+		fieldValue.Type() == timeType ||
+		fieldValue.Type() == durationType {
+		return false, nil
+	}
+
+	// If source provided a nested map directly, recurse into that map.
+	entry, found := data[keyPath]
+	if found && entry.value != nil {
+		if rawMap, ok := entry.value.(map[string]any); ok {
+			nestedData := make(map[string]mergedEntry)
+			for k, v := range rawMap {
+				nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
+			}
+			return true, bindStruct(fieldValue, nestedData, provenanceFields, "", fieldPath)
+		}
+	}
+
+	// Fallback: recurse using flattened dot-notation keys.
+	return true, bindStruct(fieldValue, data, provenanceFields, keyPath, fieldPath)
+}
+
+func bindScalarField(
+	fieldValue reflect.Value,
+	tagCfg tagConfig,
+	keyPath string,
+	fieldPath string,
+	data map[string]mergedEntry,
+	provenanceFields *[]FieldProvenance,
+) []FieldError {
+	// Look up value in data map
+	entry, found := data[keyPath]
+	var rawValue any
+	var sourceName string
+
+	if found {
+		rawValue = entry.value
+		sourceName = entry.sourceName
+	} else if tagCfg.hasDefault {
+		// Apply default value
+		rawValue = tagCfg.defValue
+		sourceName = "default"
+	}
+
+	// If no value found and no default, leave as zero value.
+	// The validation phase will check if the field is required.
+	if !found && !tagCfg.hasDefault {
+		return nil
+	}
+
+	// Convert value to target type
+	convertedValue, err := convertValue(rawValue, fieldValue.Type())
+	if err != nil {
+		return []FieldError{{
+			FieldPath: fieldPath,
+			Code:      ErrCodeInvalidType,
+			Message:   fmt.Sprintf("type conversion failed: %v", err),
+		}}
+	}
+
+	// Set field value and record provenance.
+	if fieldValue.CanSet() {
+		fieldValue.Set(reflect.ValueOf(convertedValue))
+
+		if provenanceFields != nil {
+			sourceInfo := sourceName
+			if found && entry.sourceKey != "" {
+				sourceInfo = entry.sourceKey
+			}
+
+			*provenanceFields = append(*provenanceFields, FieldProvenance{
+				FieldPath:  fieldPath,
+				KeyPath:    keyPath,
+				SourceName: sourceInfo,
+				Secret:     tagCfg.secret,
+			})
+		}
+	}
+
+	return nil
 }
 
 // determineKeyPath determines the configuration key path for a field.
@@ -581,11 +612,7 @@ func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) s
 // deriveFieldKey derives a configuration key from a field name.
 // It fully lowercases the field name to match source key normalization.
 func deriveFieldKey(fieldName string) string {
-	if fieldName == "" {
-		return ""
-	}
-
-	return strings.ToLower(fieldName)
+	return normalize.DeriveFieldPath(fieldName)
 }
 
 // isOptionalType checks if a type is an Optional[T] type.

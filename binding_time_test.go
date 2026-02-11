@@ -88,9 +88,9 @@ func TestBindStruct_TimeTimeField(t *testing.T) {
 	}
 
 	data := map[string]mergedEntry{
-		"createdat": {value: "2025-11-30T12:00:00Z", sourceName: "file"},
-		"updatedat": {value: "2025-12-01T15:30:00+05:30", sourceName: "env"},
-		"date":      {value: "2025-11-30", sourceName: "default"},
+		"created_at": {value: "2025-11-30T12:00:00Z", sourceName: "file"},
+		"updated_at": {value: "2025-12-01T15:30:00+05:30", sourceName: "env"},
+		"date":       {value: "2025-11-30", sourceName: "default"},
 	}
 
 	var cfg Config
@@ -150,8 +150,8 @@ func TestBindStruct_TimeDurationAndTimeTime(t *testing.T) {
 	}
 
 	data := map[string]mergedEntry{
-		"timeout":   {value: "30s", sourceName: "file"},
-		"createdat": {value: "2025-11-30T12:00:00Z", sourceName: "file"},
+		"timeout":    {value: "30s", sourceName: "file"},
+		"created_at": {value: "2025-11-30T12:00:00Z", sourceName: "file"},
 	}
 
 	var cfg Config

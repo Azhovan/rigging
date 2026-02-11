@@ -15,21 +15,21 @@ func TestBindStruct_FieldNameNormalization(t *testing.T) {
 		value     string
 	}{
 		{
-			name:      "APIKey matches apikey",
+			name:      "APIKey matches api_key",
 			fieldName: "APIKey",
-			configKey: "apikey",
+			configKey: "api_key",
 			value:     "secret123",
 		},
 		{
-			name:      "MaxConnections matches maxconnections",
+			name:      "MaxConnections matches max_connections",
 			fieldName: "MaxConnections",
-			configKey: "maxconnections",
+			configKey: "max_connections",
 			value:     "100",
 		},
 		{
-			name:      "RetryTimeout matches retrytimeout",
+			name:      "RetryTimeout matches retry_timeout",
 			fieldName: "RetryTimeout",
-			configKey: "retrytimeout",
+			configKey: "retry_timeout",
 			value:     "30s",
 		},
 	}
@@ -51,9 +51,9 @@ func TestBindStruct_MultiWordFields(t *testing.T) {
 	}
 
 	data := map[string]mergedEntry{
-		"apikey":         {value: "secret123", sourceName: "env"},
-		"maxconnections": {value: "100", sourceName: "file"},
-		"retrytimeout":   {value: "30s", sourceName: "default"},
+		"api_key":         {value: "secret123", sourceName: "env"},
+		"max_connections": {value: "100", sourceName: "file"},
+		"retry_timeout":   {value: "30s", sourceName: "default"},
 	}
 
 	var cfg Config
@@ -151,11 +151,11 @@ func TestDeriveFieldKey(t *testing.T) {
 	}{
 		{"Host", "host"},
 		{"Port", "port"},
-		{"APIKey", "apikey"},
-		{"MaxConnections", "maxconnections"},
-		{"RetryTimeout", "retrytimeout"},
-		{"HTTPServer", "httpserver"},
-		{"URLPath", "urlpath"},
+		{"APIKey", "api_key"},
+		{"MaxConnections", "max_connections"},
+		{"RetryTimeout", "retry_timeout"},
+		{"HTTPServer", "http_server"},
+		{"URLPath", "url_path"},
 		{"", ""},
 	}
 
