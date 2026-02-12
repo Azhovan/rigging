@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/Azhovan/rigging"
@@ -47,13 +48,23 @@ type FeaturesConfig struct {
 	RateLimit     rigging.Optional[int] `conf:"min:1"`
 }
 
+// ClickHouseConfig holds ClickHouse connection settings
+type ClickHouseConfig struct {
+	Host     string `conf:"required"`
+	Port     int    `conf:"default:9000,min:1,max:65535"`
+	Database string `conf:"default:default"`
+	Secure   bool   `conf:"default:false"`
+}
+
 // AppConfig is the root configuration structure
 type AppConfig struct {
-	Environment string         `conf:"default:development,oneof:development,staging,production"`
-	Database    DatabaseConfig `conf:"prefix:database"`
-	Server      ServerConfig   `conf:"prefix:server"`
-	Logging     LoggingConfig  `conf:"prefix:logging"`
-	Features    FeaturesConfig `conf:"prefix:features"`
+	Environment     string                      `conf:"default:development,oneof:development,staging,production"`
+	Database        DatabaseConfig              `conf:"prefix:database"`
+	Server          ServerConfig                `conf:"prefix:server"`
+	Logging         LoggingConfig               `conf:"prefix:logging"`
+	Features        FeaturesConfig              `conf:"prefix:features"`
+	ClickhouseNodes []ClickHouseConfig          `conf:"name:clickhouse_nodes"`
+	Clickhouse      map[string]ClickHouseConfig `conf:"name:clickhouse"`
 }
 
 // customValidator demonstrates cross-field validation
@@ -189,6 +200,31 @@ func main() {
 		fmt.Printf("  Rate Limit: [not set]\n")
 	}
 
+	fmt.Printf("\nClickHouse Nodes (list):\n")
+	if len(cfg.ClickhouseNodes) == 0 {
+		fmt.Printf("  [none configured]\n")
+	} else {
+		for i, node := range cfg.ClickhouseNodes {
+			fmt.Printf("  [%d] %s:%d (db=%s, secure=%v)\n", i, node.Host, node.Port, node.Database, node.Secure)
+		}
+	}
+
+	fmt.Printf("\nClickHouse Clusters (map):\n")
+	if len(cfg.Clickhouse) == 0 {
+		fmt.Printf("  [none configured]\n")
+	} else {
+		names := make([]string, 0, len(cfg.Clickhouse))
+		for name := range cfg.Clickhouse {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			cluster := cfg.Clickhouse[name]
+			fmt.Printf("  %s -> %s:%d (db=%s, secure=%v)\n", name, cluster.Host, cluster.Port, cluster.Database, cluster.Secure)
+		}
+	}
+
 	// Demonstrate provenance tracking
 	fmt.Println()
 	fmt.Println("=== Configuration Provenance ===")
@@ -236,5 +272,6 @@ func main() {
 	fmt.Println("  export APP_DATABASE__PASSWORD=secret123")
 	fmt.Println("  export APP_SERVER__PORT=9090")
 	fmt.Println("  export APP_FEATURES__ENABLE_METRICS=true")
+	fmt.Println("  export APP_CLICKHOUSE__PRIMARY__HOST=ch-primary-override.internal")
 	fmt.Println("\nThen run the example again to see the overrides in action!")
 }

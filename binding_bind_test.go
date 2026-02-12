@@ -504,6 +504,75 @@ func TestBindStruct_NestedStructFromMap(t *testing.T) {
 	}
 }
 
+func TestBindStruct_SliceOfStruct(t *testing.T) {
+	type Clickhouse struct {
+		Host string
+		Port int
+	}
+	type Config struct {
+		Clickhouse []Clickhouse
+	}
+
+	data := map[string]mergedEntry{
+		"clickhouse": {
+			value: []any{
+				map[string]any{"host": "ch1", "port": 9000},
+				map[string]any{"host": "ch2", "port": 9001},
+			},
+			sourceName: "file:config.yaml",
+		},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	expected := []Clickhouse{
+		{Host: "ch1", Port: 9000},
+		{Host: "ch2", Port: 9001},
+	}
+	if !reflect.DeepEqual(cfg.Clickhouse, expected) {
+		t.Fatalf("Clickhouse = %#v, want %#v", cfg.Clickhouse, expected)
+	}
+}
+
+func TestBindStruct_MapOfStructFromFlattenedKeys(t *testing.T) {
+	type Clickhouse struct {
+		Host string
+		Port int
+	}
+	type Config struct {
+		Clickhouse map[string]Clickhouse
+	}
+
+	// Simulates file source flattening:
+	// clickhouse.primary.host, clickhouse.primary.port, ...
+	data := map[string]mergedEntry{
+		"clickhouse.primary.host":   {value: "ch1", sourceName: "file:config.yaml"},
+		"clickhouse.primary.port":   {value: 9000, sourceName: "file:config.yaml"},
+		"clickhouse.analytics.host": {value: "ch2", sourceName: "file:config.yaml"},
+		"clickhouse.analytics.port": {value: 9001, sourceName: "file:config.yaml"},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	expected := map[string]Clickhouse{
+		"primary":   {Host: "ch1", Port: 9000},
+		"analytics": {Host: "ch2", Port: 9001},
+	}
+	if !reflect.DeepEqual(cfg.Clickhouse, expected) {
+		t.Fatalf("Clickhouse = %#v, want %#v", cfg.Clickhouse, expected)
+	}
+}
+
 // Helper function to find provenance by field path
 func findProvenance(fields []FieldProvenance, fieldPath string) *FieldProvenance {
 	for i := range fields {

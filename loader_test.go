@@ -413,6 +413,92 @@ func TestLoad_StrictMode(t *testing.T) {
 	}
 }
 
+func TestLoad_StrictMode_MapOfStructDynamicKeys(t *testing.T) {
+	type Clickhouse struct {
+		Host string
+		Port int
+	}
+	type Config struct {
+		Clickhouse map[string]Clickhouse
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"clickhouse.primary.host":   "ch1",
+			"clickhouse.primary.port":   9000,
+			"clickhouse.analytics.host": "ch2",
+			"clickhouse.analytics.port": 9001,
+		},
+	}
+
+	cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	expected := map[string]Clickhouse{
+		"primary":   {Host: "ch1", Port: 9000},
+		"analytics": {Host: "ch2", Port: 9001},
+	}
+	if !reflect.DeepEqual(cfg.Clickhouse, expected) {
+		t.Fatalf("Clickhouse = %#v, want %#v", cfg.Clickhouse, expected)
+	}
+}
+
+func TestLoad_StrictMode_MapOfPrimitiveDynamicKeys(t *testing.T) {
+	type Config struct {
+		Metadata map[string]string
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"metadata.team":  "platform",
+			"metadata.owner": "infra",
+		},
+	}
+
+	cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	expected := map[string]string{
+		"team":  "platform",
+		"owner": "infra",
+	}
+	if !reflect.DeepEqual(cfg.Metadata, expected) {
+		t.Fatalf("Metadata = %#v, want %#v", cfg.Metadata, expected)
+	}
+}
+
+func TestLoad_StrictMode_MapOfPrimitiveRejectsDeepPath(t *testing.T) {
+	type Config struct {
+		Metadata map[string]string
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"metadata.team.name": "platform",
+		},
+	}
+
+	_, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+	if err == nil {
+		t.Fatal("expected unknown key error for deep primitive map key")
+	}
+
+	valErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+	if len(valErr.FieldErrors) != 1 {
+		t.Fatalf("expected 1 field error, got %d", len(valErr.FieldErrors))
+	}
+	if valErr.FieldErrors[0].Code != ErrCodeUnknownKey {
+		t.Fatalf("expected unknown_key error, got %q", valErr.FieldErrors[0].Code)
+	}
+}
+
 // TestLoad_Provenance verifies that provenance is stored for loaded config.
 func TestLoad_Provenance(t *testing.T) {
 	type Config struct {

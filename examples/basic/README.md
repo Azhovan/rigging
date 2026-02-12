@@ -11,6 +11,7 @@ go run main.go
 # Override with environment variables
 export APP_DATABASE__PASSWORD=secret123
 export APP_SERVER__PORT=9090
+export APP_CLICKHOUSE__PRIMARY__HOST=ch-primary-override.internal
 go run main.go
 ```
 
@@ -24,7 +25,11 @@ go run main.go
 
 # Enable feature flags
 export APP_FEATURES__ENABLE_METRICS=true
-export APP_FEATURES__RATELIMIT=5000
+export APP_FEATURES__RATE_LIMIT=5000
+go run main.go
+
+# Override a named ClickHouse cluster entry from YAML map config
+export APP_CLICKHOUSE__ANALYTICS__PORT=9010
 go run main.go
 ```
 
@@ -34,5 +39,6 @@ go run main.go
 - Tag-based and custom validation
 - Provenance tracking output
 - Secret redaction in config dumps
+- List/map of structured objects loaded from YAML (`clickhouse_nodes`, `clickhouse`)
 
 See the [main README](../../README.md) for complete documentation.

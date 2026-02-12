@@ -95,7 +95,44 @@ for _, field := range prov.Fields {
 
 This quickly answers "why is this value set?" without guesswork.
 
-## 7. Provenance Lifecycle for Long-Lived Processes
+## 7. Model Repeated and Named Backends
+
+Use `[]Struct` for ordered/repeated entries and `map[string]Struct` for named dynamic entries.
+
+```go
+type ClickHouseConfig struct {
+    Host string
+    Port int
+}
+
+type Config struct {
+    // Ordered list of backends
+    ClickhouseNodes []ClickHouseConfig `conf:"name:clickhouse_nodes"`
+
+    // Named backends keyed by environment/role
+    Clickhouse map[string]ClickHouseConfig `conf:"name:clickhouse"`
+}
+```
+
+```yaml
+clickhouse_nodes:
+  - host: ch1.internal
+    port: 9000
+  - host: ch2.internal
+    port: 9000
+
+clickhouse:
+  primary:
+    host: ch-primary.internal
+    port: 9000
+  analytics:
+    host: ch-analytics.internal
+    port: 9001
+```
+
+When strict mode is enabled, keys under declared maps (for example `clickhouse.primary.host`) are treated as valid.
+
+## 8. Provenance Lifecycle for Long-Lived Processes
 
 If you do not want global provenance retention:
 

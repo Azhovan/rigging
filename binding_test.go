@@ -681,6 +681,10 @@ func TestBinding_ParseTag_CacheIsolationForOneofSlice(t *testing.T) {
 }
 
 func TestBinding_ConvertValue(t *testing.T) {
+	type testStruct struct {
+		Key string
+	}
+
 	tests := []struct {
 		name        string
 		rawValue    any
@@ -948,13 +952,25 @@ func TestBinding_ConvertValue(t *testing.T) {
 			targetType: reflect.TypeOf([]string{}),
 			want:       []string{"a", "1", "true"},
 		},
+		{
+			name:       "[]any map to []struct",
+			rawValue:   []any{map[string]any{"key": "a"}, map[string]any{"key": "b"}},
+			targetType: reflect.TypeOf([]testStruct{}),
+			want:       []testStruct{{Key: "a"}, {Key: "b"}},
+		},
 
-		// Nested struct (map) - should return as-is
+		// Struct conversions
 		{
 			name:       "map to struct",
 			rawValue:   map[string]any{"key": "value"},
-			targetType: reflect.TypeOf(struct{ Key string }{}),
-			want:       map[string]any{"key": "value"},
+			targetType: reflect.TypeOf(testStruct{}),
+			want:       testStruct{Key: "value"},
+		},
+		{
+			name:       "map to map[string]struct",
+			rawValue:   map[string]any{"primary": map[string]any{"key": "value"}},
+			targetType: reflect.TypeOf(map[string]testStruct{}),
+			want:       map[string]testStruct{"primary": {Key: "value"}},
 		},
 
 		// Same type - return as-is

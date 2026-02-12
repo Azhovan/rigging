@@ -260,16 +260,19 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 		}
 	}
 
-	// Handle nested structs - return as-is for recursive binding
-	if targetType.Kind() == reflect.Struct {
-		// If rawValue is a map, it will be handled by recursive binding
-		if rawType.Kind() == reflect.Map {
+	switch targetType.Kind() {
+	case reflect.Struct:
+		return convertToStruct(rawValue, targetType)
+	case reflect.Slice:
+		return convertToSlice(rawValue, targetType)
+	case reflect.Map:
+		return convertToMap(rawValue, targetType)
+	case reflect.Interface:
+		// Preserve dynamic values for interface{} / any map elements.
+		if rawType.AssignableTo(targetType) || rawType.Implements(targetType) {
 			return rawValue, nil
 		}
-		// If rawValue is already a struct, return as-is
-		if rawType.Kind() == reflect.Struct {
-			return rawValue, nil
-		}
+		return nil, fmt.Errorf("cannot convert %T to %s", rawValue, targetType)
 	}
 
 	// Convert to string first for easier parsing
@@ -385,16 +388,128 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 		}
 		return val, nil
 
-	case reflect.Slice:
-		// Handle []string
-		if targetType.Elem().Kind() == reflect.String {
-			return parseStringSlice(rawValue)
-		}
-		return nil, fmt.Errorf("unsupported slice type: %s", targetType)
-
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)
 	}
+}
+
+func convertToStruct(rawValue any, targetType reflect.Type) (any, error) {
+	rawType := reflect.TypeOf(rawValue)
+
+	if rawType.AssignableTo(targetType) {
+		return rawValue, nil
+	}
+
+	if rawType.ConvertibleTo(targetType) {
+		return reflect.ValueOf(rawValue).Convert(targetType).Interface(), nil
+	}
+
+	if rawType.Kind() != reflect.Map {
+		return nil, fmt.Errorf("cannot convert %T to %s", rawValue, targetType)
+	}
+
+	converted := reflect.New(targetType).Elem()
+	nestedData := mapToMergedEntries(rawValue)
+	bindErrors := bindStruct(converted, nestedData, nil, "", "")
+	if len(bindErrors) > 0 {
+		return nil, fmt.Errorf("cannot convert %T to %s: %s", rawValue, targetType, bindErrors[0].Message)
+	}
+	return converted.Interface(), nil
+}
+
+func convertToSlice(rawValue any, targetType reflect.Type) (any, error) {
+	if targetType.Elem().Kind() == reflect.String {
+		if parsed, err := parseStringSlice(rawValue); err == nil {
+			return parsed, nil
+		}
+	}
+
+	raw := reflect.ValueOf(rawValue)
+	if raw.Kind() != reflect.Slice && raw.Kind() != reflect.Array {
+		return nil, fmt.Errorf("unsupported slice type: %s", targetType)
+	}
+
+	result := reflect.MakeSlice(targetType, raw.Len(), raw.Len())
+	for i := 0; i < raw.Len(); i++ {
+		convertedElem, err := convertValue(raw.Index(i).Interface(), targetType.Elem())
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert index %d to %s: %w", i, targetType.Elem(), err)
+		}
+
+		elemValue, err := toReflectValue(convertedElem, targetType.Elem())
+		if err != nil {
+			return nil, fmt.Errorf("cannot set index %d: %w", i, err)
+		}
+		result.Index(i).Set(elemValue)
+	}
+
+	return result.Interface(), nil
+}
+
+func convertToMap(rawValue any, targetType reflect.Type) (any, error) {
+	raw := reflect.ValueOf(rawValue)
+	if raw.Kind() != reflect.Map {
+		return nil, fmt.Errorf("cannot convert %T to %s", rawValue, targetType)
+	}
+
+	result := reflect.MakeMapWithSize(targetType, raw.Len())
+	iter := raw.MapRange()
+	for iter.Next() {
+		convertedKey, err := convertValue(iter.Key().Interface(), targetType.Key())
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert map key %v to %s: %w", iter.Key().Interface(), targetType.Key(), err)
+		}
+		keyValue, err := toReflectValue(convertedKey, targetType.Key())
+		if err != nil {
+			return nil, fmt.Errorf("cannot set map key %v: %w", iter.Key().Interface(), err)
+		}
+
+		convertedElem, err := convertValue(iter.Value().Interface(), targetType.Elem())
+		if err != nil {
+			return nil, fmt.Errorf("cannot convert map value for key %v to %s: %w", iter.Key().Interface(), targetType.Elem(), err)
+		}
+		elemValue, err := toReflectValue(convertedElem, targetType.Elem())
+		if err != nil {
+			return nil, fmt.Errorf("cannot set map value for key %v: %w", iter.Key().Interface(), err)
+		}
+
+		result.SetMapIndex(keyValue, elemValue)
+	}
+
+	return result.Interface(), nil
+}
+
+func toReflectValue(converted any, targetType reflect.Type) (reflect.Value, error) {
+	if converted == nil {
+		return reflect.Zero(targetType), nil
+	}
+
+	value := reflect.ValueOf(converted)
+	if value.Type().AssignableTo(targetType) {
+		return value, nil
+	}
+	if value.Type().ConvertibleTo(targetType) {
+		return value.Convert(targetType), nil
+	}
+
+	return reflect.Value{}, fmt.Errorf("type %s is not assignable/convertible to %s", value.Type(), targetType)
+}
+
+func mapToMergedEntries(rawValue any) map[string]mergedEntry {
+	result := make(map[string]mergedEntry)
+	raw := reflect.ValueOf(rawValue)
+	iter := raw.MapRange()
+	for iter.Next() {
+		key, ok := iter.Key().Interface().(string)
+		if !ok {
+			continue
+		}
+
+		result[strings.ToLower(key)] = mergedEntry{
+			value: iter.Value().Interface(),
+		}
+	}
+	return result
 }
 
 // parseBool parses a boolean value from a string.
@@ -545,6 +660,14 @@ func bindScalarField(
 	if found {
 		rawValue = entry.value
 		sourceName = entry.sourceName
+	} else if fieldValue.Kind() == reflect.Map {
+		// File sources flatten maps into dot-keys (e.g., "clickhouse.primary.host").
+		// Reconstruct the map value from all matching prefixed keys.
+		if prefixedMap, prefixedSource, ok := buildMapFromPrefixedEntries(keyPath, data); ok {
+			rawValue = prefixedMap
+			sourceName = prefixedSource
+			found = true
+		}
 	} else if tagCfg.hasDefault {
 		// Apply default value
 		rawValue = tagCfg.defValue
@@ -587,6 +710,91 @@ func bindScalarField(
 	}
 
 	return nil
+}
+
+func buildMapFromPrefixedEntries(keyPath string, data map[string]mergedEntry) (map[string]any, string, bool) {
+	prefix := keyPath + "."
+	result := make(map[string]any)
+
+	found := false
+	sourceName := ""
+	multipleSources := false
+
+	for key, entry := range data {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		suffix := strings.TrimPrefix(key, prefix)
+		if suffix == "" {
+			continue
+		}
+
+		parts := strings.Split(suffix, ".")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+
+		found = true
+		if sourceName == "" {
+			sourceName = entry.sourceName
+		} else if entry.sourceName != sourceName {
+			multipleSources = true
+		}
+
+		mapKey := parts[0]
+		if len(parts) == 1 {
+			result[mapKey] = entry.value
+			continue
+		}
+
+		existing, ok := result[mapKey]
+		var nested map[string]any
+		if ok {
+			if typed, isMap := existing.(map[string]any); isMap {
+				nested = typed
+			} else {
+				nested = make(map[string]any)
+				result[mapKey] = nested
+			}
+		} else {
+			nested = make(map[string]any)
+			result[mapKey] = nested
+		}
+
+		setNestedValue(nested, parts[1:], entry.value)
+	}
+
+	if !found {
+		return nil, "", false
+	}
+
+	if multipleSources {
+		sourceName = "multiple"
+	}
+
+	return result, sourceName, true
+}
+
+func setNestedValue(root map[string]any, path []string, value any) {
+	current := root
+	for i, part := range path {
+		if part == "" {
+			return
+		}
+
+		if i == len(path)-1 {
+			current[part] = value
+			return
+		}
+
+		next, ok := current[part].(map[string]any)
+		if !ok {
+			next = make(map[string]any)
+			current[part] = next
+		}
+		current = next
+	}
 }
 
 // determineKeyPath determines the configuration key path for a field.

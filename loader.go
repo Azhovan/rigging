@@ -115,7 +115,7 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
 		for key := range mergedData {
-			if !validKeys[key] {
+			if !validKeys[key] && !isDynamicMapKey(key, reflect.TypeOf(cfg), "") {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
@@ -253,6 +253,103 @@ func collectValidKeys(t reflect.Type, prefix string) map[string]bool {
 	}
 
 	return validKeys
+}
+
+// isDynamicMapKey checks whether a key matches a dynamic map entry path.
+// Example: for field "clickhouse map[string]Cfg", "clickhouse.primary.host" is valid.
+func isDynamicMapKey(key string, t reflect.Type, parentPrefix string) bool {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+
+	for _, meta := range getStructFieldMeta(t) {
+		field := meta.field
+		tagCfg := meta.tagCfg
+
+		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
+		fieldType := unwrapOptionalType(field.Type)
+
+		if fieldType.Kind() == reflect.Map && matchesMapFieldKey(key, keyPath, fieldType.Elem()) {
+			return true
+		}
+
+		if fieldType.Kind() == reflect.Struct && fieldType.PkgPath() != "time" {
+			nestedPrefix := keyPath
+			if tagCfg.prefix != "" {
+				nestedPrefix = tagCfg.prefix
+			}
+			if isDynamicMapKey(key, fieldType, nestedPrefix) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func matchesMapFieldKey(fullKey, mapPath string, elemType reflect.Type) bool {
+	prefix := mapPath + "."
+	if !strings.HasPrefix(fullKey, prefix) {
+		return false
+	}
+
+	rest := strings.TrimPrefix(fullKey, prefix)
+	if rest == "" {
+		return false
+	}
+
+	parts := strings.SplitN(rest, ".", 2)
+	if parts[0] == "" {
+		return false
+	}
+
+	// keyPath.<entry>
+	if len(parts) == 1 {
+		return true
+	}
+
+	return matchesMapElementNestedKey(parts[1], elemType)
+}
+
+func matchesMapElementNestedKey(nestedKey string, elemType reflect.Type) bool {
+	elemType = unwrapOptionalType(elemType)
+
+	switch elemType.Kind() {
+	case reflect.Struct:
+		if elemType.PkgPath() == "time" {
+			return false
+		}
+		return isKnownStructSubKey(nestedKey, elemType)
+	case reflect.Map:
+		parts := strings.SplitN(nestedKey, ".", 2)
+		if parts[0] == "" {
+			return false
+		}
+		if len(parts) == 1 {
+			return true
+		}
+		return matchesMapElementNestedKey(parts[1], elemType.Elem())
+	default:
+		return false
+	}
+}
+
+func isKnownStructSubKey(key string, t reflect.Type) bool {
+	validKeys := collectValidKeys(t, "")
+	if validKeys[key] {
+		return true
+	}
+	return isDynamicMapKey(key, t, "")
+}
+
+func unwrapOptionalType(t reflect.Type) reflect.Type {
+	if isOptionalType(t) {
+		return t.Field(0).Type
+	}
+	return t
 }
 
 // watchLoop is the main goroutine that monitors sources for changes and reloads configuration.

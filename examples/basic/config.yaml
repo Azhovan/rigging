@@ -9,16 +9,16 @@ database:
   name: myapp_staging
   user: app_user
   password: staging_password_123
-  maxconnections: 25
-  sslmode: require
-  connecttimeout: 10s
+  max_connections: 25
+  ssl_mode: require
+  connect_timeout: 10s
 
 server:
   host: 0.0.0.0
   port: 8080
-  readtimeout: 30s
-  writetimeout: 30s
-  shutdowntimeout: 10s
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 10s
 
 logging:
   level: info
@@ -26,6 +26,28 @@ logging:
   output: stdout
 
 features:
-  enablemetrics: true
-  enabletracing: false
-  ratelimit: 1000
+  enable_metrics: true
+  enable_tracing: false
+  rate_limit: 1000
+
+clickhouse_nodes:
+  - host: ch-node-1.staging.example.com
+    port: 9000
+    database: events
+    secure: true
+  - host: ch-node-2.staging.example.com
+    port: 9000
+    database: analytics
+    secure: true
+
+clickhouse:
+  primary:
+    host: ch-primary.staging.example.com
+    port: 9000
+    database: events
+    secure: true
+  analytics:
+    host: ch-analytics.staging.example.com
+    port: 9001
+    database: analytics
+    secure: true
