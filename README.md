@@ -56,43 +56,6 @@ cfg, err := loader.Load(ctx)
 // No runtime type assertions needed
 ```
 
-### Collections of Structured Config
-
-Rigging supports collections of nested structs from file sources, including slices (`[]T`) and maps (`map[string]T`).
-
-```go
-type ClickHouseConfig struct {
-    Host string
-    Port int
-}
-
-type Config struct {
-    // Repeated entries
-    ClickhouseNodes []ClickHouseConfig `conf:"name:clickhouse_nodes"`
-
-    // Named entries (dynamic keys)
-    Clickhouse map[string]ClickHouseConfig `conf:"name:clickhouse"`
-}
-```
-
-```yaml
-clickhouse_nodes:
-  - host: ch1.internal
-    port: 9000
-  - host: ch2.internal
-    port: 9000
-
-clickhouse:
-  primary:
-    host: ch-primary.internal
-    port: 9000
-  analytics:
-    host: ch-analytics.internal
-    port: 9001
-```
-
-In strict mode, dynamic map keys like `clickhouse.primary.host` are accepted when they match a declared `map[string]...` field.
-
 ### 2. Observable Configuration
 
 Track the source of every configuration value. Know exactly where each value came from for debugging and compliance.

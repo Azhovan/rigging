@@ -967,6 +967,13 @@ func TestBinding_ConvertValue(t *testing.T) {
 			want:       testStruct{Key: "value"},
 		},
 		{
+			name:        "map with non-string key to struct returns error",
+			rawValue:    map[any]any{1: "value"},
+			targetType:  reflect.TypeOf(testStruct{}),
+			wantErr:     true,
+			errContains: "non-string key",
+		},
+		{
 			name:       "map to map[string]struct",
 			rawValue:   map[string]any{"primary": map[string]any{"key": "value"}},
 			targetType: reflect.TypeOf(map[string]testStruct{}),

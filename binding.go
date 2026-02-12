@@ -409,7 +409,10 @@ func convertToStruct(rawValue any, targetType reflect.Type) (any, error) {
 	}
 
 	converted := reflect.New(targetType).Elem()
-	nestedData := mapToMergedEntries(rawValue)
+	nestedData, err := mapToMergedEntries(rawValue)
+	if err != nil {
+		return nil, fmt.Errorf("cannot convert %T to %s: %w", rawValue, targetType, err)
+	}
 	bindErrors := bindStruct(converted, nestedData, nil, "", "")
 	if len(bindErrors) > 0 {
 		return nil, fmt.Errorf("cannot convert %T to %s: %s", rawValue, targetType, formatFieldErrors(bindErrors))
@@ -495,21 +498,22 @@ func toReflectValue(converted any, targetType reflect.Type) (reflect.Value, erro
 	return reflect.Value{}, fmt.Errorf("type %s is not assignable/convertible to %s", value.Type(), targetType)
 }
 
-func mapToMergedEntries(rawValue any) map[string]mergedEntry {
+func mapToMergedEntries(rawValue any) (map[string]mergedEntry, error) {
 	result := make(map[string]mergedEntry)
 	raw := reflect.ValueOf(rawValue)
 	iter := raw.MapRange()
 	for iter.Next() {
-		key, ok := iter.Key().Interface().(string)
-		if !ok {
-			continue
+		keyValue := iter.Key()
+		if keyValue.Kind() != reflect.String {
+			return nil, fmt.Errorf("map contains non-string key of type %T", keyValue.Interface())
 		}
+		key := keyValue.String()
 
 		result[strings.ToLower(key)] = mergedEntry{
 			value: iter.Value().Interface(),
 		}
 	}
-	return result
+	return result, nil
 }
 
 func formatFieldErrors(errors []FieldError) string {

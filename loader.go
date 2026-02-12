@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,8 @@ type Loader[T any] struct {
 	validators []Validator[T]
 	strict     bool // Fail on unknown keys (default: true)
 }
+
+var dynamicMapMatcherCache sync.Map
 
 // NewLoader creates a Loader with no sources/validators and strict mode enabled.
 func NewLoader[T any]() *Loader[T] {
@@ -110,12 +113,14 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 	if l.strict {
 		// Get all valid field keys from the struct
 		var cfg T
-		validKeys := collectValidKeys(reflect.TypeOf(cfg), "")
+		cfgType := reflect.TypeOf(cfg)
+		validKeys := collectValidKeys(cfgType, "")
+		dynamicMatcher := getDynamicMapMatcher(cfgType)
 
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
 		for key := range mergedData {
-			if !validKeys[key] && !isDynamicMapKey(key, reflect.TypeOf(cfg), "") {
+			if !validKeys[key] && !dynamicMatcher.matches(key) {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
@@ -255,16 +260,55 @@ func collectValidKeys(t reflect.Type, prefix string) map[string]bool {
 	return validKeys
 }
 
-// isDynamicMapKey checks whether a key matches a dynamic map entry path.
-// Example: for field "clickhouse map[string]Cfg", "clickhouse.primary.host" is valid.
-func isDynamicMapKey(key string, t reflect.Type, parentPrefix string) bool {
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return false
+type dynamicMapMatcher struct {
+	rules []dynamicMapRule
+}
+
+type dynamicMapRule struct {
+	prefix string
+	elem   dynamicElemMatcher
+}
+
+type dynamicElemMatcher struct {
+	kind           reflect.Kind
+	structKeys     map[string]bool
+	structMapRules []dynamicMapRule
+	mapElem        *dynamicElemMatcher
+}
+
+func getDynamicMapMatcher(t reflect.Type) dynamicMapMatcher {
+	t = normalizeStructType(t)
+	if t == nil || t.Kind() != reflect.Struct {
+		return dynamicMapMatcher{}
 	}
 
+	if cached, ok := dynamicMapMatcherCache.Load(t); ok {
+		if matcher, ok := cached.(dynamicMapMatcher); ok {
+			return matcher
+		}
+	}
+
+	matcher := dynamicMapMatcher{
+		rules: collectDynamicMapRules(t, ""),
+	}
+	dynamicMapMatcherCache.Store(t, matcher)
+	return matcher
+}
+
+func normalizeStructType(t reflect.Type) reflect.Type {
+	for t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t
+}
+
+func collectDynamicMapRules(t reflect.Type, parentPrefix string) []dynamicMapRule {
+	t = normalizeStructType(t)
+	if t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	rules := make([]dynamicMapRule, 0)
 	for _, meta := range getStructFieldMeta(t) {
 		field := meta.field
 		tagCfg := meta.tagCfg
@@ -272,8 +316,11 @@ func isDynamicMapKey(key string, t reflect.Type, parentPrefix string) bool {
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
 		fieldType := unwrapOptionalType(field.Type)
 
-		if fieldType.Kind() == reflect.Map && matchesMapFieldKey(key, keyPath, fieldType.Elem()) {
-			return true
+		if fieldType.Kind() == reflect.Map {
+			rules = append(rules, dynamicMapRule{
+				prefix: keyPath,
+				elem:   buildDynamicElemMatcher(fieldType.Elem()),
+			})
 		}
 
 		if fieldType.Kind() == reflect.Struct && fieldType.PkgPath() != "time" {
@@ -281,28 +328,59 @@ func isDynamicMapKey(key string, t reflect.Type, parentPrefix string) bool {
 			if tagCfg.prefix != "" {
 				nestedPrefix = tagCfg.prefix
 			}
-			if isDynamicMapKey(key, fieldType, nestedPrefix) {
-				return true
-			}
+			rules = append(rules, collectDynamicMapRules(fieldType, nestedPrefix)...)
 		}
 	}
 
+	return rules
+}
+
+func buildDynamicElemMatcher(t reflect.Type) dynamicElemMatcher {
+	t = unwrapOptionalType(t)
+
+	switch t.Kind() {
+	case reflect.Struct:
+		if t.PkgPath() == "time" {
+			return dynamicElemMatcher{kind: t.Kind()}
+		}
+		return dynamicElemMatcher{
+			kind:           t.Kind(),
+			structKeys:     collectValidKeys(t, ""),
+			structMapRules: collectDynamicMapRules(t, ""),
+		}
+	case reflect.Map:
+		next := buildDynamicElemMatcher(t.Elem())
+		return dynamicElemMatcher{
+			kind:    t.Kind(),
+			mapElem: &next,
+		}
+	default:
+		return dynamicElemMatcher{kind: t.Kind()}
+	}
+}
+
+func (m dynamicMapMatcher) matches(key string) bool {
+	for _, rule := range m.rules {
+		if rule.matches(key) {
+			return true
+		}
+	}
 	return false
 }
 
-func matchesMapFieldKey(fullKey, mapPath string, elemType reflect.Type) bool {
-	prefix := mapPath + "."
+func (r dynamicMapRule) matches(fullKey string) bool {
+	prefix := r.prefix + "."
 	if !strings.HasPrefix(fullKey, prefix) {
 		return false
 	}
 
 	rest := strings.TrimPrefix(fullKey, prefix)
-	if rest == "" {
-		return false
-	}
+	return matchDynamicMapRest(rest, r.elem)
+}
 
+func matchDynamicMapRest(rest string, elem dynamicElemMatcher) bool {
 	parts := strings.SplitN(rest, ".", 2)
-	if parts[0] == "" {
+	if len(parts) == 0 || parts[0] == "" {
 		return false
 	}
 
@@ -311,38 +389,29 @@ func matchesMapFieldKey(fullKey, mapPath string, elemType reflect.Type) bool {
 		return true
 	}
 
-	return matchesMapElementNestedKey(parts[1], elemType)
+	return elem.matches(parts[1])
 }
 
-func matchesMapElementNestedKey(nestedKey string, elemType reflect.Type) bool {
-	elemType = unwrapOptionalType(elemType)
-
-	switch elemType.Kind() {
+func (e dynamicElemMatcher) matches(path string) bool {
+	switch e.kind {
 	case reflect.Struct:
-		if elemType.PkgPath() == "time" {
-			return false
-		}
-		return isKnownStructSubKey(nestedKey, elemType)
-	case reflect.Map:
-		parts := strings.SplitN(nestedKey, ".", 2)
-		if parts[0] == "" {
-			return false
-		}
-		if len(parts) == 1 {
+		if e.structKeys[path] {
 			return true
 		}
-		return matchesMapElementNestedKey(parts[1], elemType.Elem())
+		for _, rule := range e.structMapRules {
+			if rule.matches(path) {
+				return true
+			}
+		}
+		return false
+	case reflect.Map:
+		if e.mapElem == nil {
+			return false
+		}
+		return matchDynamicMapRest(path, *e.mapElem)
 	default:
 		return false
 	}
-}
-
-func isKnownStructSubKey(key string, t reflect.Type) bool {
-	validKeys := collectValidKeys(t, "")
-	if validKeys[key] {
-		return true
-	}
-	return isDynamicMapKey(key, t, "")
 }
 
 func unwrapOptionalType(t reflect.Type) reflect.Type {

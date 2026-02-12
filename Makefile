@@ -1,4 +1,9 @@
-.PHONY: help test fmt vet lint ci clean
+.PHONY: help test fmt vet lint ci clean bench bench-compare
+
+BASE_REF ?= main
+BENCH ?= BenchmarkCreateSnapshot_SmallConfig$$
+BENCH_COUNT ?= 5
+BENCH_PKG ?= .
 
 # Default target
 help:
@@ -9,6 +14,8 @@ help:
 	@echo "  make fmt     Format code"
 	@echo "  make vet     Run go vet"
 	@echo "  make lint    Run golangci-lint"
+	@echo "  make bench   Run configured benchmark on current tree"
+	@echo "  make bench-compare Compare benchmark vs base ref using benchstat"
 	@echo "  make clean   Clean artifacts"
 
 # Run tests
@@ -33,6 +40,14 @@ lint:
 		echo "golangci-lint not installed. Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
 		exit 1; \
 	fi
+
+# Run benchmark on current tree
+bench:
+	@go test $(BENCH_PKG) -run '^$$' -bench "$(BENCH)" -benchmem -count $(BENCH_COUNT)
+
+# Compare benchmark against base ref (default: main)
+bench-compare:
+	@./scripts/bench_compare.sh "$(BASE_REF)" "$(BENCH)" "$(BENCH_COUNT)" "$(BENCH_PKG)"
 
 # Run all CI checks
 ci:

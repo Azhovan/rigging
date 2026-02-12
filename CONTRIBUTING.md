@@ -129,6 +129,8 @@ make test     # Run tests
 make fmt      # Format code
 make vet      # Run go vet
 make lint     # Run golangci-lint
+make bench-compare  # Compare current benchmark vs main using benchstat
+make bench-compare BENCH='BenchmarkLoad_StrictMode_DynamicMapManyKeys$$'  # Strict-mode perf check
 make clean    # Clean artifacts
 ```
 
@@ -137,6 +139,27 @@ make clean    # Clean artifacts
 go test -race ./...                     # Tests
 go vet ./...                            # Vet
 gofmt -s -w .                           # Format
+./scripts/bench_compare.sh main 'BenchmarkCreateSnapshot_SmallConfig$$' 5 .
+./scripts/bench_compare.sh main 'BenchmarkLoad_StrictMode_DynamicMapManyKeys$$' 5 .
+```
+
+### Benchmark Comparison Notes
+
+- `make bench-compare` requires the benchmark name to exist in both refs (`BASE_REF` and current tree).
+- If a benchmark exists only on your branch, run it with `make bench` instead of `make bench-compare`.
+- For branch-only benchmarks, compare against an earlier commit in your branch where the same benchmark already exists.
+
+Examples:
+
+```bash
+# 1) Compare a benchmark that exists in both refs
+make bench-compare BENCH='BenchmarkCreateSnapshot_SmallConfig$$' BENCH_COUNT=10
+
+# 2) Run a benchmark that exists only in current branch (no cross-ref compare)
+make bench BENCH='BenchmarkLoad_StrictMode_DynamicMapManyKeys$$' BENCH_COUNT=10
+
+# 3) Compare branch-only benchmark against an earlier commit in this branch
+make bench-compare BASE_REF=<commit-sha> BENCH='BenchmarkLoad_StrictMode_DynamicMapManyKeys$$' BENCH_COUNT=10
 ```
 
 ## Getting Help
