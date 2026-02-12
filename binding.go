@@ -429,7 +429,7 @@ func convertToSlice(rawValue any, targetType reflect.Type) (any, error) {
 
 	raw := reflect.ValueOf(rawValue)
 	if raw.Kind() != reflect.Slice && raw.Kind() != reflect.Array {
-		return nil, fmt.Errorf("unsupported slice type: %s", targetType)
+		return nil, fmt.Errorf("cannot convert %T to %s: source must be slice/array", rawValue, targetType)
 	}
 
 	result := reflect.MakeSlice(targetType, raw.Len(), raw.Len())
