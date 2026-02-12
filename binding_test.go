@@ -1093,6 +1093,29 @@ func TestBinding_ConvertValue_Optional(t *testing.T) {
 	})
 }
 
+func TestBinding_ConvertValue_StructErrorAggregation(t *testing.T) {
+	type targetConfig struct {
+		Port       int
+		MaxRetries int
+	}
+
+	_, err := convertValue(map[string]any{
+		"port":        "not-a-number",
+		"max_retries": "also-not-a-number",
+	}, reflect.TypeOf(targetConfig{}))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "Port: invalid_type") {
+		t.Fatalf("expected aggregated error to include Port path/code, got: %s", msg)
+	}
+	if !strings.Contains(msg, "MaxRetries: invalid_type") {
+		t.Fatalf("expected aggregated error to include MaxRetries path/code, got: %s", msg)
+	}
+}
+
 func TestBinding_ParseBool(t *testing.T) {
 	tests := []struct {
 		input   string

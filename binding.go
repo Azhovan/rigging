@@ -412,7 +412,7 @@ func convertToStruct(rawValue any, targetType reflect.Type) (any, error) {
 	nestedData := mapToMergedEntries(rawValue)
 	bindErrors := bindStruct(converted, nestedData, nil, "", "")
 	if len(bindErrors) > 0 {
-		return nil, fmt.Errorf("cannot convert %T to %s: %s", rawValue, targetType, bindErrors[0].Message)
+		return nil, fmt.Errorf("cannot convert %T to %s: %s", rawValue, targetType, formatFieldErrors(bindErrors))
 	}
 	return converted.Interface(), nil
 }
@@ -510,6 +510,29 @@ func mapToMergedEntries(rawValue any) map[string]mergedEntry {
 		}
 	}
 	return result
+}
+
+func formatFieldErrors(errors []FieldError) string {
+	if len(errors) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(errors))
+	for _, fieldErr := range errors {
+		fieldPath := fieldErr.FieldPath
+		if fieldPath == "" {
+			fieldPath = "<root>"
+		}
+
+		if fieldErr.Code != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s (%s)", fieldPath, fieldErr.Code, fieldErr.Message))
+			continue
+		}
+
+		parts = append(parts, fmt.Sprintf("%s: %s", fieldPath, fieldErr.Message))
+	}
+
+	return strings.Join(parts, "; ")
 }
 
 // parseBool parses a boolean value from a string.

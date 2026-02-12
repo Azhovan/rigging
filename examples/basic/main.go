@@ -67,6 +67,27 @@ type AppConfig struct {
 	Clickhouse      map[string]ClickHouseConfig `conf:"name:clickhouse"`
 }
 
+func printClickHouseClusters(clusters map[string]ClickHouseConfig) {
+	if len(clusters) == 0 {
+		fmt.Println("  [none configured]")
+		return
+	}
+
+	for _, name := range sortedClusterNames(clusters) {
+		cluster := clusters[name]
+		fmt.Printf("  %s -> %s:%d (db=%s, secure=%v)\n", name, cluster.Host, cluster.Port, cluster.Database, cluster.Secure)
+	}
+}
+
+func sortedClusterNames(clusters map[string]ClickHouseConfig) []string {
+	names := make([]string, 0, len(clusters))
+	for name := range clusters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // customValidator demonstrates cross-field validation
 func customValidator(ctx context.Context, cfg *AppConfig) error {
 	var fieldErrors []rigging.FieldError
@@ -210,20 +231,7 @@ func main() {
 	}
 
 	fmt.Printf("\nClickHouse Clusters (map):\n")
-	if len(cfg.Clickhouse) == 0 {
-		fmt.Printf("  [none configured]\n")
-	} else {
-		names := make([]string, 0, len(cfg.Clickhouse))
-		for name := range cfg.Clickhouse {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-
-		for _, name := range names {
-			cluster := cfg.Clickhouse[name]
-			fmt.Printf("  %s -> %s:%d (db=%s, secure=%v)\n", name, cluster.Host, cluster.Port, cluster.Database, cluster.Secure)
-		}
-	}
+	printClickHouseClusters(cfg.Clickhouse)
 
 	// Demonstrate provenance tracking
 	fmt.Println()
