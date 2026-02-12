@@ -37,6 +37,7 @@ cleanup() {
 	if git -C "${ROOT}" worktree list --porcelain | grep -F "worktree ${WORKTREE_DIR}" >/dev/null 2>&1; then
 		git -C "${ROOT}" worktree remove --force "${WORKTREE_DIR}" >/dev/null 2>&1 || true
 	fi
+	rm -rf "${WORKTREE_DIR}"
 	rm -f "${BASE_OUT}" "${HEAD_OUT}"
 }
 trap cleanup EXIT

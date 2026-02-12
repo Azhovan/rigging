@@ -140,7 +140,7 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 
 	// Step 4: Bind struct fields from merged data
 	var provenanceFields []FieldProvenance
-	bindErrors := bindStruct(cfgValue, mergedData, &provenanceFields, "", "")
+	bindErrors := bindStruct(cfgValue, mergedData, &provenanceFields, "")
 
 	// Step 5: Validate struct (tag-based validation)
 	validationErrors := validateStruct(cfgValue)

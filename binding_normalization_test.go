@@ -58,7 +58,7 @@ func TestBindStruct_MultiWordFields(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -98,7 +98,7 @@ func TestBindStruct_PrefixNormalization(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -124,7 +124,7 @@ func TestBindStruct_CustomNameNormalization(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)

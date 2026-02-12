@@ -95,7 +95,7 @@ func TestBindStruct_TimeTimeField(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -131,7 +131,7 @@ func TestBindStruct_TimeTimeInvalidFormat(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) == 0 {
 		t.Fatal("expected error for invalid time format")
@@ -156,7 +156,7 @@ func TestBindStruct_TimeDurationAndTimeTime(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)

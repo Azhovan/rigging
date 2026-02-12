@@ -2,6 +2,7 @@ package rigging
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func TestBindStruct_SimpleFields(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -51,7 +52,7 @@ func TestBindStruct_WithDefaults(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -87,7 +88,7 @@ func TestBindStruct_RequiredField(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	// Binding phase should not check for required fields - that's validation's job
 	// So we expect 0 errors from binding
@@ -117,7 +118,7 @@ func TestBindStruct_TypeConversionError(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) != 1 {
 		t.Fatalf("errors = %d, want 1", len(errors))
@@ -147,7 +148,7 @@ func TestBindStruct_NestedStruct(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -186,7 +187,7 @@ func TestBindStruct_NestedStructWithPrefix(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -220,7 +221,7 @@ func TestBindStruct_CustomName(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -251,7 +252,7 @@ func TestBindStruct_SecretField(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -283,7 +284,7 @@ func TestBindStruct_OptionalField(t *testing.T) {
 
 		var cfg Config
 		var provFields []FieldProvenance
-		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 		if len(errors) > 0 {
 			t.Fatalf("unexpected errors: %v", errors)
@@ -303,7 +304,7 @@ func TestBindStruct_OptionalField(t *testing.T) {
 
 		var cfg Config
 		var provFields []FieldProvenance
-		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 		if len(errors) > 0 {
 			t.Fatalf("unexpected errors: %v", errors)
@@ -324,7 +325,7 @@ func TestBindStruct_OptionalField(t *testing.T) {
 
 		var cfg ConfigWithDefault
 		var provFields []FieldProvenance
-		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+		errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 		if len(errors) > 0 {
 			t.Fatalf("unexpected errors: %v", errors)
@@ -354,7 +355,7 @@ func TestBindStruct_MultipleErrors(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	// Binding phase only checks type conversion errors, not required fields
 	// Should have 1 error: 1 type conversion (required checks are in validation phase)
@@ -412,7 +413,7 @@ func TestBindStruct_AllTypes(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -490,7 +491,7 @@ func TestBindStruct_NestedStructFromMap(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
@@ -525,7 +526,7 @@ func TestBindStruct_SliceOfStruct(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
 	}
@@ -559,7 +560,7 @@ func TestBindStruct_MapOfStructFromFlattenedKeys(t *testing.T) {
 
 	var cfg Config
 	var provFields []FieldProvenance
-	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
 	if len(errors) > 0 {
 		t.Fatalf("unexpected errors: %v", errors)
 	}
@@ -570,6 +571,79 @@ func TestBindStruct_MapOfStructFromFlattenedKeys(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Clickhouse, expected) {
 		t.Fatalf("Clickhouse = %#v, want %#v", cfg.Clickhouse, expected)
+	}
+}
+
+func TestBindStruct_MapOfStructFromFlattenedKeys_NestedPrefix(t *testing.T) {
+	type Node struct {
+		Host string
+		Port int
+	}
+	type Database struct {
+		Nodes map[string]Node
+	}
+	type Config struct {
+		Database Database `conf:"prefix:app.db"`
+	}
+
+	data := map[string]mergedEntry{
+		"app.db.nodes.primary.host":   {value: "db1", sourceName: "file:config.yaml"},
+		"app.db.nodes.primary.port":   {value: 5432, sourceName: "file:config.yaml"},
+		"app.db.nodes.analytics.host": {value: "db2", sourceName: "file:config.yaml"},
+		"app.db.nodes.analytics.port": {value: 5433, sourceName: "file:config.yaml"},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	expected := map[string]Node{
+		"primary":   {Host: "db1", Port: 5432},
+		"analytics": {Host: "db2", Port: 5433},
+	}
+	if !reflect.DeepEqual(cfg.Database.Nodes, expected) {
+		t.Fatalf("Database.Nodes = %#v, want %#v", cfg.Database.Nodes, expected)
+	}
+}
+
+func TestBindStruct_MapOfStructFromFlattenedKeys_MultipleSourcesProvenance(t *testing.T) {
+	type Node struct {
+		Host string
+		Port int
+	}
+	type Config struct {
+		Clickhouse map[string]Node
+	}
+
+	data := map[string]mergedEntry{
+		"clickhouse.primary.host":   {value: "ch1", sourceName: "file:config.yaml"},
+		"clickhouse.primary.port":   {value: 9000, sourceName: "env:APP_"},
+		"clickhouse.analytics.host": {value: "ch2", sourceName: "file:config.yaml"},
+		"clickhouse.analytics.port": {value: 9001, sourceName: "env:APP_"},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "")
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	clickhouseProv := findProvenance(provFields, "Clickhouse")
+	if clickhouseProv == nil {
+		t.Fatal("Clickhouse provenance not found")
+	}
+
+	if !strings.HasPrefix(clickhouseProv.SourceName, SourceNameMultiple+":") {
+		t.Fatalf("Clickhouse source = %q, want prefix %q", clickhouseProv.SourceName, SourceNameMultiple+":")
+	}
+
+	expectedSource := SourceNameMultiple + ":env:APP_,file:config.yaml"
+	if clickhouseProv.SourceName != expectedSource {
+		t.Fatalf("Clickhouse source = %q, want %q", clickhouseProv.SourceName, expectedSource)
 	}
 }
 

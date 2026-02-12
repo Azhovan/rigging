@@ -413,7 +413,7 @@ func convertToStruct(rawValue any, targetType reflect.Type) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot convert %T to %s: %w", rawValue, targetType, err)
 	}
-	bindErrors := bindStruct(converted, nestedData, nil, "", "")
+	bindErrors := bindStruct(converted, nestedData, nil, "")
 	if len(bindErrors) > 0 {
 		return nil, fmt.Errorf("cannot convert %T to %s: %s", rawValue, targetType, formatFieldErrors(bindErrors))
 	}
@@ -591,11 +591,51 @@ type mergedEntry struct {
 	sourceKey  string // Original key from the source (e.g., "API_DATABASE__PASSWORD")
 }
 
+type prefixedEntry struct {
+	suffixParts []string
+	entry       mergedEntry
+}
+
+type prefixedEntryIndex map[string][]prefixedEntry
+
+func buildPrefixedEntryIndex(data map[string]mergedEntry) prefixedEntryIndex {
+	index := make(prefixedEntryIndex)
+
+	for key, entry := range data {
+		parts := strings.Split(key, ".")
+		if len(parts) < 2 || parts[0] == "" {
+			continue
+		}
+
+		prefix := parts[0]
+		for i := 1; i < len(parts); i++ {
+			index[prefix] = append(index[prefix], prefixedEntry{
+				suffixParts: parts[i:],
+				entry:       entry,
+			})
+			prefix += "." + parts[i]
+		}
+	}
+
+	return index
+}
+
 // bindStruct binds configuration data to a struct using reflection.
 // It walks struct fields recursively, parses tags, looks up values in the data map,
 // applies defaults, converts types, and records provenance.
 // All errors are collected and returned together rather than failing fast.
-func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentPrefix string, parentFieldPath string) []FieldError {
+func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentFieldPath string) []FieldError {
+	return bindStructWithPrefixIndex(target, data, buildPrefixedEntryIndex(data), provenanceFields, "", parentFieldPath)
+}
+
+func bindStructWithPrefixIndex(
+	target reflect.Value,
+	data map[string]mergedEntry,
+	prefixIndex prefixedEntryIndex,
+	provenanceFields *[]FieldProvenance,
+	parentPrefix string,
+	parentFieldPath string,
+) []FieldError {
 	var fieldErrors []FieldError
 
 	// Ensure the target is a struct
@@ -623,12 +663,12 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 		// Determine the key path for lookup
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
 
-		if handled, nestedErrors := tryBindNestedField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields); handled {
+		if handled, nestedErrors := tryBindNestedField(fieldValue, tagCfg, keyPath, fieldPath, data, prefixIndex, provenanceFields); handled {
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
 
-		fieldErrors = append(fieldErrors, bindScalarField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields)...)
+		fieldErrors = append(fieldErrors, bindScalarField(fieldValue, tagCfg, keyPath, fieldPath, data, prefixIndex, provenanceFields)...)
 	}
 
 	return fieldErrors
@@ -640,11 +680,12 @@ func tryBindNestedField(
 	keyPath string,
 	fieldPath string,
 	data map[string]mergedEntry,
+	prefixIndex prefixedEntryIndex,
 	provenanceFields *[]FieldProvenance,
 ) (bool, []FieldError) {
 	// Handle nested structs with explicit prefix first.
 	if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
-		return true, bindStruct(fieldValue, data, provenanceFields, tagCfg.prefix, fieldPath)
+		return true, bindStructWithPrefixIndex(fieldValue, data, prefixIndex, provenanceFields, tagCfg.prefix, fieldPath)
 	}
 
 	// Handle regular nested structs (excluding Optional/time primitives).
@@ -663,12 +704,12 @@ func tryBindNestedField(
 			for k, v := range rawMap {
 				nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
 			}
-			return true, bindStruct(fieldValue, nestedData, provenanceFields, "", fieldPath)
+			return true, bindStruct(fieldValue, nestedData, provenanceFields, fieldPath)
 		}
 	}
 
 	// Fallback: recurse using flattened dot-notation keys.
-	return true, bindStruct(fieldValue, data, provenanceFields, keyPath, fieldPath)
+	return true, bindStructWithPrefixIndex(fieldValue, data, prefixIndex, provenanceFields, keyPath, fieldPath)
 }
 
 func bindScalarField(
@@ -677,6 +718,7 @@ func bindScalarField(
 	keyPath string,
 	fieldPath string,
 	data map[string]mergedEntry,
+	prefixIndex prefixedEntryIndex,
 	provenanceFields *[]FieldProvenance,
 ) []FieldError {
 	// Look up value in data map
@@ -690,7 +732,7 @@ func bindScalarField(
 	} else if fieldValue.Kind() == reflect.Map {
 		// File sources flatten maps into dot-keys (e.g., "clickhouse.primary.host").
 		// Reconstruct the map value from all matching prefixed keys.
-		if prefixedMap, prefixedSource, ok := buildMapFromPrefixedEntries(keyPath, data); ok {
+		if prefixedMap, prefixedSource, ok := buildMapFromPrefixedEntries(keyPath, prefixIndex); ok {
 			rawValue = prefixedMap
 			sourceName = prefixedSource
 			found = true
@@ -739,34 +781,27 @@ func bindScalarField(
 	return nil
 }
 
-func buildMapFromPrefixedEntries(keyPath string, data map[string]mergedEntry) (map[string]any, string, bool) {
-	prefix := keyPath + "."
+func buildMapFromPrefixedEntries(keyPath string, prefixIndex prefixedEntryIndex) (map[string]any, string, bool) {
+	candidates := prefixIndex[keyPath]
+	if len(candidates) == 0 {
+		return nil, "", false
+	}
+
 	result := make(map[string]any)
 
 	found := false
-	sourceName := ""
-	multipleSources := false
+	uniqueSources := make(map[string]struct{})
 
-	for key, entry := range data {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		suffix := strings.TrimPrefix(key, prefix)
-		if suffix == "" {
-			continue
-		}
-
-		parts := strings.Split(suffix, ".")
+	for _, candidate := range candidates {
+		parts := candidate.suffixParts
 		if len(parts) == 0 || parts[0] == "" {
 			continue
 		}
 
+		entry := candidate.entry
 		found = true
-		if sourceName == "" {
-			sourceName = entry.sourceName
-		} else if entry.sourceName != sourceName {
-			multipleSources = true
+		if entry.sourceName != "" {
+			uniqueSources[entry.sourceName] = struct{}{}
 		}
 
 		mapKey := parts[0]
@@ -796,11 +831,26 @@ func buildMapFromPrefixedEntries(keyPath string, data map[string]mergedEntry) (m
 		return nil, "", false
 	}
 
-	if multipleSources {
-		sourceName = "multiple"
+	sourceName := formatMapFieldSourceName(uniqueSources)
+	return result, sourceName, true
+}
+
+func formatMapFieldSourceName(uniqueSources map[string]struct{}) string {
+	if len(uniqueSources) == 0 {
+		return ""
+	}
+	if len(uniqueSources) == 1 {
+		for sourceName := range uniqueSources {
+			return sourceName
+		}
 	}
 
-	return result, sourceName, true
+	sources := make([]string, 0, len(uniqueSources))
+	for sourceName := range uniqueSources {
+		sources = append(sources, sourceName)
+	}
+	sort.Strings(sources)
+	return SourceNameMultiple + ":" + strings.Join(sources, ",")
 }
 
 func setNestedValue(root map[string]any, path []string, value any) {

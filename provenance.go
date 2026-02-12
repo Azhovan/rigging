@@ -15,6 +15,9 @@ type FieldProvenance struct {
 	Secret     bool   // Whether field is secret
 }
 
+// SourceNameMultiple marks provenance entries derived from multiple sources.
+const SourceNameMultiple = "multiple"
+
 var provenanceStore sync.Map
 
 // GetProvenance returns provenance metadata for a loaded configuration.
