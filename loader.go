@@ -135,10 +135,12 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 
 	// Step 4: Bind struct fields from merged data
 	var provenanceFields []FieldProvenance
-	bindErrors := bindStruct(cfgValue, mergedData, &provenanceFields, "", "")
+	presentFields := make(map[string]bool)
+	bindErrors := bindStructWithPresence(cfgValue, mergedData, &provenanceFields, presentFields, "", "")
 
 	// Step 5: Validate struct (tag-based validation)
-	validationErrors := validateStruct(cfgValue)
+	// Required checks use presence data captured before conversion.
+	validationErrors := validateStructWithPresence(cfgValue, presentFields)
 
 	// Merge binding and validation errors
 	allErrors := append(bindErrors, validationErrors...)

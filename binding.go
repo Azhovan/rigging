@@ -454,6 +454,17 @@ type mergedEntry struct {
 // applies defaults, converts types, and records provenance.
 // All errors are collected and returned together rather than failing fast.
 func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFields *[]FieldProvenance, parentPrefix string, parentFieldPath string) []FieldError {
+	return bindStructWithPresence(target, data, provenanceFields, nil, parentPrefix, parentFieldPath)
+}
+
+func bindStructWithPresence(
+	target reflect.Value,
+	data map[string]mergedEntry,
+	provenanceFields *[]FieldProvenance,
+	presentFields map[string]bool,
+	parentPrefix string,
+	parentFieldPath string,
+) []FieldError {
 	var fieldErrors []FieldError
 
 	// Ensure the target is a struct
@@ -481,12 +492,12 @@ func bindStruct(target reflect.Value, data map[string]mergedEntry, provenanceFie
 		// Determine the key path for lookup
 		keyPath := determineKeyPath(field.Name, tagCfg, parentPrefix)
 
-		if handled, nestedErrors := tryBindNestedField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields); handled {
+		if handled, nestedErrors := tryBindNestedField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields, presentFields); handled {
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
 
-		fieldErrors = append(fieldErrors, bindScalarField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields)...)
+		fieldErrors = append(fieldErrors, bindScalarField(fieldValue, tagCfg, keyPath, fieldPath, data, provenanceFields, presentFields)...)
 	}
 
 	return fieldErrors
@@ -499,10 +510,19 @@ func tryBindNestedField(
 	fieldPath string,
 	data map[string]mergedEntry,
 	provenanceFields *[]FieldProvenance,
+	presentFields map[string]bool,
 ) (bool, []FieldError) {
+	bindNested := func(target reflect.Value, bindData map[string]mergedEntry, prefix string, path string) []FieldError {
+		if presentFields == nil {
+			return bindStruct(target, bindData, provenanceFields, prefix, path)
+		}
+
+		return bindStructWithPresence(target, bindData, provenanceFields, presentFields, prefix, path)
+	}
+
 	// Handle nested structs with explicit prefix first.
 	if fieldValue.Kind() == reflect.Struct && tagCfg.prefix != "" {
-		return true, bindStruct(fieldValue, data, provenanceFields, tagCfg.prefix, fieldPath)
+		return true, bindNested(fieldValue, data, tagCfg.prefix, fieldPath)
 	}
 
 	// Handle regular nested structs (excluding Optional/time primitives).
@@ -521,12 +541,12 @@ func tryBindNestedField(
 			for k, v := range rawMap {
 				nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
 			}
-			return true, bindStruct(fieldValue, nestedData, provenanceFields, "", fieldPath)
+			return true, bindNested(fieldValue, nestedData, "", fieldPath)
 		}
 	}
 
 	// Fallback: recurse using flattened dot-notation keys.
-	return true, bindStruct(fieldValue, data, provenanceFields, keyPath, fieldPath)
+	return true, bindNested(fieldValue, data, keyPath, fieldPath)
 }
 
 func bindScalarField(
@@ -536,6 +556,7 @@ func bindScalarField(
 	fieldPath string,
 	data map[string]mergedEntry,
 	provenanceFields *[]FieldProvenance,
+	presentFields map[string]bool,
 ) []FieldError {
 	// Look up value in data map
 	entry, found := data[keyPath]
@@ -555,6 +576,12 @@ func bindScalarField(
 	// The validation phase will check if the field is required.
 	if !found && !tagCfg.hasDefault {
 		return nil
+	}
+
+	// Track presence before conversion so required semantics reflect provided keys
+	// even if conversion fails.
+	if presentFields != nil {
+		presentFields[fieldPath] = true
 	}
 
 	// Convert value to target type
