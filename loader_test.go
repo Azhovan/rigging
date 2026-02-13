@@ -300,6 +300,208 @@ func TestLoad_ValidationError(t *testing.T) {
 	}
 }
 
+func TestLoad_RequiredAllowsProvidedZeroValues(t *testing.T) {
+	type Config struct {
+		Enabled bool   `conf:"required"`
+		Port    int    `conf:"required"`
+		Note    string `conf:"required"`
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"enabled": false,
+			"port":    0,
+			"note":    "",
+		},
+	}
+
+	loader := NewLoader[Config]().WithSource(source)
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.Enabled != false {
+		t.Errorf("expected Enabled=false, got %v", cfg.Enabled)
+	}
+	if cfg.Port != 0 {
+		t.Errorf("expected Port=0, got %d", cfg.Port)
+	}
+	if cfg.Note != "" {
+		t.Errorf("expected Note empty string, got %q", cfg.Note)
+	}
+}
+
+func TestLoad_RequiredPresentZeroStillValidatesOtherConstraints(t *testing.T) {
+	type Config struct {
+		Port int    `conf:"required,min:1"`
+		Mode string `conf:"required,oneof:prod,staging"`
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"port": 0,
+			"mode": "",
+		},
+	}
+
+	loader := NewLoader[Config]().WithSource(source)
+	cfg, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+
+	valErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+
+	foundMin := false
+	foundOneOf := false
+	foundRequired := false
+	for _, fe := range valErr.FieldErrors {
+		if fe.FieldPath == "Port" && fe.Code == ErrCodeMin {
+			foundMin = true
+		}
+		if fe.FieldPath == "Mode" && fe.Code == ErrCodeOneOf {
+			foundOneOf = true
+		}
+		if fe.Code == ErrCodeRequired {
+			foundRequired = true
+		}
+	}
+
+	if !foundMin {
+		t.Error("expected min error for Port field")
+	}
+	if !foundOneOf {
+		t.Error("expected oneof error for Mode field")
+	}
+	if foundRequired {
+		t.Error("did not expect required errors when fields are present")
+	}
+	if cfg != nil {
+		t.Error("cfg should be nil when validation fails")
+	}
+}
+
+func TestLoad_RequiredProvidedButInvalidTypeDoesNotAlsoReturnRequired(t *testing.T) {
+	type Config struct {
+		Port int `conf:"required"`
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"port": "not-a-number",
+		},
+	}
+
+	loader := NewLoader[Config]().WithSource(source)
+	cfg, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+
+	valErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+
+	foundInvalidType := false
+	foundRequired := false
+	for _, fe := range valErr.FieldErrors {
+		if fe.FieldPath == "Port" && fe.Code == ErrCodeInvalidType {
+			foundInvalidType = true
+		}
+		if fe.FieldPath == "Port" && fe.Code == ErrCodeRequired {
+			foundRequired = true
+		}
+	}
+
+	if !foundInvalidType {
+		t.Error("expected invalid type error for Port field")
+	}
+	if foundRequired {
+		t.Error("did not expect required error when key is present")
+	}
+	if cfg != nil {
+		t.Error("cfg should be nil when validation fails")
+	}
+}
+
+func TestLoad_PresentZeroValuesValidateConstraintsWithoutRequired(t *testing.T) {
+	type Config struct {
+		Port int    `conf:"min:1"`
+		Mode string `conf:"oneof:prod,staging"`
+	}
+
+	t.Run("present zero values still validate", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"port": 0,
+				"mode": "",
+			},
+		}
+
+		loader := NewLoader[Config]().WithSource(source)
+		cfg, err := loader.Load(context.Background())
+		if err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected *ValidationError, got %T", err)
+		}
+
+		foundMin := false
+		foundOneOf := false
+		foundRequired := false
+		for _, fe := range valErr.FieldErrors {
+			if fe.FieldPath == "Port" && fe.Code == ErrCodeMin {
+				foundMin = true
+			}
+			if fe.FieldPath == "Mode" && fe.Code == ErrCodeOneOf {
+				foundOneOf = true
+			}
+			if fe.Code == ErrCodeRequired {
+				foundRequired = true
+			}
+		}
+
+		if !foundMin {
+			t.Error("expected min error for Port field")
+		}
+		if !foundOneOf {
+			t.Error("expected oneof error for Mode field")
+		}
+		if foundRequired {
+			t.Error("did not expect required errors for non-required fields")
+		}
+		if cfg != nil {
+			t.Error("cfg should be nil when validation fails")
+		}
+	})
+
+	t.Run("absent optional fields skip constraints", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{},
+		}
+
+		loader := NewLoader[Config]().WithSource(source)
+		cfg, err := loader.Load(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error for absent optional fields: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+	})
+}
+
 // TestLoad_CustomValidator verifies that custom validators are executed.
 func TestLoad_CustomValidator(t *testing.T) {
 	type Config struct {

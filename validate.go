@@ -11,11 +11,27 @@ import (
 // It checks required, min, max, and oneof constraints based on the field's type.
 // Returns a slice of FieldError for any validation failures.
 func validateField(fieldValue reflect.Value, fieldPath string, tags tagConfig) []FieldError {
+	return validateFieldWithPresence(fieldValue, fieldPath, tags, nil)
+}
+
+// validateFieldWithPresence validates a single field with optional presence metadata.
+// When presentFields is provided, required checks use field presence rather than non-zero values.
+func validateFieldWithPresence(fieldValue reflect.Value, fieldPath string, tags tagConfig, presentFields map[string]bool) []FieldError {
 	var errors []FieldError
+	fieldPresent := presentFields != nil && presentFields[fieldPath]
 
 	// Check required constraint
 	if tags.required {
-		if isZeroValue(fieldValue) {
+		if presentFields != nil {
+			if !fieldPresent {
+				errors = append(errors, FieldError{
+					FieldPath: fieldPath,
+					Code:      ErrCodeRequired,
+					Message:   "field is required but not provided",
+				})
+				return errors
+			}
+		} else if isZeroValue(fieldValue) {
 			errors = append(errors, FieldError{
 				FieldPath: fieldPath,
 				Code:      ErrCodeRequired,
@@ -27,7 +43,9 @@ func validateField(fieldValue reflect.Value, fieldPath string, tags tagConfig) [
 	}
 
 	// Skip other validations if value is zero (for non-required fields)
-	if isZeroValue(fieldValue) {
+	// With presence metadata, validate zero values when the field is present.
+	// Without presence metadata, preserve legacy behavior for non-required fields.
+	if isZeroValue(fieldValue) && ((presentFields != nil && !fieldPresent) || (presentFields == nil && !tags.required)) {
 		return errors
 	}
 
@@ -55,12 +73,24 @@ func validateField(fieldValue reflect.Value, fieldPath string, tags tagConfig) [
 // It recursively validates nested structs.
 // Returns a slice of all FieldError encountered.
 func validateStruct(cfg reflect.Value) []FieldError {
-	return validateStructRecursive(cfg, "")
+	return validateStructWithPresence(cfg, nil)
+}
+
+// validateStructWithPresence validates a struct with optional field presence metadata.
+func validateStructWithPresence(cfg reflect.Value, presentFields map[string]bool) []FieldError {
+	return validateStructRecursive(cfg, "", presentFields)
 }
 
 // validateStructRecursive is the internal recursive implementation of validateStruct.
-func validateStructRecursive(cfg reflect.Value, parentFieldPath string) []FieldError {
+func validateStructRecursive(cfg reflect.Value, parentFieldPath string, presentFields map[string]bool) []FieldError {
 	var fieldErrors []FieldError
+	validateFieldFn := func(value reflect.Value, path string, tags tagConfig) []FieldError {
+		if presentFields == nil {
+			return validateField(value, path, tags)
+		}
+
+		return validateFieldWithPresence(value, path, tags, presentFields)
+	}
 
 	// Dereference pointer if needed
 	if cfg.Kind() == reflect.Ptr {
@@ -90,15 +120,23 @@ func validateStructRecursive(cfg reflect.Value, parentFieldPath string) []FieldE
 
 		tagCfg := meta.tagCfg
 
-		// Handle Optional[T] types - validate the inner value if set
+		// Handle Optional[T] types.
 		if isOptionalType(fieldValue.Type()) {
 			setField := fieldValue.Field(1) // Set field
-			if setField.Bool() {
-				valueField := fieldValue.Field(0) // Value field
-				// Validate the inner value
-				errors := validateField(valueField, fieldPath, tagCfg)
-				fieldErrors = append(fieldErrors, errors...)
+			if !setField.Bool() {
+				if tagCfg.required && (presentFields == nil || !presentFields[fieldPath]) {
+					fieldErrors = append(fieldErrors, FieldError{
+						FieldPath: fieldPath,
+						Code:      ErrCodeRequired,
+						Message:   "field is required but not provided",
+					})
+				}
+				continue
 			}
+
+			valueField := fieldValue.Field(0) // Value field
+			errors := validateFieldFn(valueField, fieldPath, tagCfg)
+			fieldErrors = append(fieldErrors, errors...)
 			continue
 		}
 
@@ -107,19 +145,19 @@ func validateStructRecursive(cfg reflect.Value, parentFieldPath string) []FieldE
 			// Skip time.Time and time.Duration (they're structs but should be treated as primitives)
 			if fieldValue.Type().PkgPath() == "time" {
 				// Validate as a regular field
-				errors := validateField(fieldValue, fieldPath, tagCfg)
+				errors := validateFieldFn(fieldValue, fieldPath, tagCfg)
 				fieldErrors = append(fieldErrors, errors...)
 				continue
 			}
 
 			// Recursively validate nested struct
-			nestedErrors := validateStructRecursive(fieldValue, fieldPath)
+			nestedErrors := validateStructRecursive(fieldValue, fieldPath, presentFields)
 			fieldErrors = append(fieldErrors, nestedErrors...)
 			continue
 		}
 
 		// Validate the field
-		errors := validateField(fieldValue, fieldPath, tagCfg)
+		errors := validateFieldFn(fieldValue, fieldPath, tagCfg)
 		fieldErrors = append(fieldErrors, errors...)
 	}
 

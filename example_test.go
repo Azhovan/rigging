@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/Azhovan/rigging"
@@ -350,6 +351,64 @@ func ExampleValidationError() {
 
 	// Output:
 	// Validation failed with 2 errors
+}
+
+// Example_validationSemantics demonstrates presence-aware validation behavior.
+func Example_validationSemantics() {
+	type Config struct {
+		Port int    `conf:"min:1"`
+		Mode string `conf:"oneof:prod,staging"`
+	}
+
+	const (
+		portKey = "EXSEM_PORT"
+		modeKey = "EXSEM_MODE"
+	)
+
+	os.Unsetenv(portKey)
+	os.Unsetenv(modeKey)
+	defer func() {
+		os.Unsetenv(portKey)
+		os.Unsetenv(modeKey)
+	}()
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXSEM_"}))
+
+	// Optional fields that are absent skip min/oneof validation.
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("absent -> port=%d mode=%q\n", cfg.Port, cfg.Mode)
+
+	// Provided zero/empty values are still validated.
+	os.Setenv(portKey, "0")
+	os.Setenv(modeKey, "")
+
+	_, err = loader.Load(context.Background())
+	if err == nil {
+		log.Fatal("expected validation error")
+	}
+
+	valErr, ok := err.(*rigging.ValidationError)
+	if !ok {
+		log.Fatal(err)
+	}
+
+	lines := make([]string, 0, len(valErr.FieldErrors))
+	for _, fe := range valErr.FieldErrors {
+		lines = append(lines, fmt.Sprintf("%s:%s", fe.FieldPath, fe.Code))
+	}
+	sort.Strings(lines)
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+
+	// Output:
+	// absent -> port=0 mode=""
+	// Mode:oneof
+	// Port:min
 }
 
 // staticSource is a custom source that provides static configuration.
