@@ -63,6 +63,17 @@ type Config struct {
 }
 ```
 
+## Key Mapping + Precedence + `required` Decision Table
+
+| Situation | Result | Validation outcome |
+|---|---|---|
+| Field `Database.Host` (no tags) + env `APP_DATABASE__HOST=db.internal` | Env key normalizes to `database.host` and binds directly. | `required` passes when tagged, because the key is present. |
+| Nested struct `conf:"prefix:database"` + child `Port int` | Child key derives to `database.port`. | Normal conversion and constraints (`min/max/oneof`) apply. |
+| Nested struct `conf:"prefix:database"` + child `Port int \`conf:"name:db.port"\`` | `name:` wins over derived/prefix key; binding uses `db.port`. | `required`/constraints evaluate on `db.port`. |
+| Same key appears in `defaults.yaml` and env (env source added later) | Later source wins; final value comes from env. | `required` passes as long as one source (or default) supplies the key. |
+| Field `Port int \`conf:"default:8080,required"\`` and key absent from all sources | Default injects `8080`. | `required` passes because presence includes defaults. |
+| Field `Port int \`conf:"required,min:1"\`` and key present as `0` or wrong type (`"abc"`) | Key is present, but value is invalid for constraints/conversion. | `required` passes; you get `min` (for `0`) or `invalid_type` (for `"abc"`), not an extra `required` error. |
+
 ## Custom Sources
 
 Implement `Source`:
@@ -89,21 +100,42 @@ type SourceWithKeys interface {
 ## Watch and Reload
 
 ```go
+ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer cancel()
+
 snapshots, errors, err := loader.Watch(ctx)
 if err != nil {
-    log.Fatal(err)
+    return fmt.Errorf("start config watch: %w", err)
 }
 
-for {
+for snapshots != nil || errors != nil {
     select {
-    case snapshot := <-snapshots:
+    case <-ctx.Done():
+        return nil
+    case snapshot, ok := <-snapshots:
+        if !ok {
+            snapshots = nil
+            continue
+        }
         log.Printf("Config reloaded: v%d (%s)", snapshot.Version, snapshot.Source)
-        applyNewConfig(snapshot.Config)
-    case err := <-errors:
+        if err := applyNewConfig(snapshot.Config); err != nil {
+            log.Printf("Apply failed (keeping last good config): %v", err)
+            continue
+        }
+    case err, ok := <-errors:
+        if !ok {
+            errors = nil
+            continue
+        }
         log.Printf("Reload failed: %v", err)
     }
 }
 ```
+
+Production notes:
+- Keep a "last good config" in your app and only swap it after successful `applyNewConfig`.
+- Record reload success/failure metrics and include `snapshot.Source` in logs for incident response.
+- Use `Load` once at startup before entering watch mode so boot fails fast on invalid config.
 
 Note:
 - Built-in `sourcefile` and `sourceenv` return `ErrWatchNotSupported`.
