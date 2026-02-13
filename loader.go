@@ -265,6 +265,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 
 	// Emit initial snapshot
 	currentVersion := int64(1)
+	currentCfg := initialCfg
 	snapshotCh <- Snapshot[T]{
 		Config:   initialCfg,
 		Version:  currentVersion,
@@ -302,6 +303,11 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 
 		changeChannels = append(changeChannels, changeCh)
 	}
+	defer func() {
+		for _, cancel := range cancelFuncs {
+			cancel()
+		}
+	}()
 
 	// If no sources support watching, we're done
 	if len(changeChannels) == 0 {
@@ -310,7 +316,21 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 
 	// Create a debounce timer
 	var debounceTimer *time.Timer
+	var debounceCh <-chan time.Time
+	pendingReload := false
+	pendingCause := ""
 	const debounceDelay = 100 * time.Millisecond
+	defer func() {
+		if debounceTimer == nil {
+			return
+		}
+		if !debounceTimer.Stop() {
+			select {
+			case <-debounceTimer.C:
+			default:
+			}
+		}
+	}()
 
 	// Merge all change channels into one
 	mergedChanges := make(chan ChangeEvent)
@@ -370,54 +390,78 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 
 	// Main watch loop
 	for {
+		if mergedChanges == nil && !pendingReload {
+			return
+		}
+
 		select {
 		case <-ctx.Done():
-			// Cancel all source watchers
-			for _, cancel := range cancelFuncs {
-				cancel()
-			}
 			return
 
 		case event, ok := <-mergedChanges:
 			if !ok {
-				// All change channels closed
-				return
-			}
-
-			// Capture the cause to avoid closure issues with loop variable
-			cause := event.Cause
-
-			// Debounce: reset timer on each event
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
-
-			debounceTimer = time.AfterFunc(debounceDelay, func() {
-				// Reload configuration
-				newCfg, err := l.Load(ctx)
-				if err != nil {
-					// Send error, keep previous config
-					select {
-					case errorCh <- fmt.Errorf("reload failed: %w", err):
-					case <-ctx.Done():
-					}
+				// All change channels closed; process any pending debounced reload first.
+				mergedChanges = nil
+				if !pendingReload {
 					return
 				}
+				continue
+			}
 
-				// Increment version and emit new snapshot
-				currentVersion++
-				snapshot := Snapshot[T]{
-					Config:   newCfg,
-					Version:  currentVersion,
-					LoadedAt: time.Now(),
-					Source:   cause,
-				}
+			// Debounce: reset timer on each event
+			pendingCause = event.Cause
+			pendingReload = true
+			if debounceTimer == nil {
+				debounceTimer = time.NewTimer(debounceDelay)
+				debounceCh = debounceTimer.C
+				continue
+			}
 
+			if !debounceTimer.Stop() {
 				select {
-				case snapshotCh <- snapshot:
-				case <-ctx.Done():
+				case <-debounceTimer.C:
+				default:
 				}
-			})
+			}
+			debounceTimer.Reset(debounceDelay)
+			debounceCh = debounceTimer.C
+
+		case <-debounceCh:
+			debounceCh = nil
+			if !pendingReload {
+				continue
+			}
+
+			// Reload configuration from the latest debounced event.
+			cause := pendingCause
+			pendingReload = false
+			newCfg, err := l.Load(ctx)
+			if err != nil {
+				// Send error, keep previous config.
+				select {
+				case errorCh <- fmt.Errorf("reload failed: %w", err):
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+
+			// Emit snapshot first; only then release the superseded provenance.
+			snapshot := Snapshot[T]{
+				Config:   newCfg,
+				Version:  currentVersion + 1,
+				LoadedAt: time.Now(),
+				Source:   cause,
+			}
+			select {
+			case snapshotCh <- snapshot:
+				currentVersion++
+				ReleaseProvenance(currentCfg)
+				currentCfg = newCfg
+			case <-ctx.Done():
+				ReleaseProvenance(newCfg)
+				return
+			}
 		}
 	}
 }
