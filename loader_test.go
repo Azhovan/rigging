@@ -950,6 +950,7 @@ func TestWatch_ReloadReleasesSupersededProvenance(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for initial snapshot")
 	}
+	t.Cleanup(func() { ReleaseProvenance(initial.Config) })
 
 	if _, ok := GetProvenance(initial.Config); !ok {
 		t.Fatal("expected initial snapshot provenance to be present")
@@ -1266,6 +1267,61 @@ done:
 	// The last snapshot should have the final value
 	if lastSnapshot.Config.Value != 10 {
 		t.Errorf("expected final Value=10, got %d", lastSnapshot.Config.Value)
+	}
+}
+
+func TestWatch_DebouncedReloadWhenSourcesCloseDoesNotPanic(t *testing.T) {
+	type Config struct {
+		Value int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"value": 1,
+	})
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	select {
+	case <-snapshots:
+		// Initial snapshot received.
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	// Queue a debounced reload and then close the source channel so watchLoop exits
+	// after handling pending work. This previously risked send-on-closed-channel panic.
+	source.updateData(map[string]any{"value": 2})
+	source.triggerChange("change-before-close")
+	source.close()
+
+	// Allow enough time for debounce and shutdown to complete.
+	deadline := time.After(2 * time.Second)
+	snapshotClosed := false
+	errorClosed := false
+	for !snapshotClosed || !errorClosed {
+		select {
+		case _, ok := <-snapshots:
+			if !ok {
+				snapshotClosed = true
+			}
+		case err, ok := <-errors:
+			if !ok {
+				errorClosed = true
+				continue
+			}
+			t.Fatalf("unexpected error: %v", err)
+		case <-deadline:
+			t.Fatal("timeout waiting for watch channels to close")
+		}
 	}
 }
 
