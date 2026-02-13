@@ -590,12 +590,18 @@ func bindScalarField(
 }
 
 // determineKeyPath determines the configuration key path for a field.
-// Priority: name tag > prefix + derived > derived
+// Priority: name tag > env tag > prefix + derived > derived
 // All keys are normalized to lowercase for consistent matching.
 func determineKeyPath(fieldName string, tagCfg tagConfig, parentPrefix string) string {
 	// If the name tag is specified, use it directly (ignores prefix)
 	if tagCfg.name != "" {
 		return strings.ToLower(tagCfg.name)
+	}
+
+	// If the env tag is specified, normalize env var syntax to a key path.
+	// Example: APP__DB__HOST -> app.db.host
+	if tagCfg.env != "" {
+		return normalize.ToLowerDotPath(tagCfg.env)
 	}
 
 	// Derive key from field name (fully lowercase)
