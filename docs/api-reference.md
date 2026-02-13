@@ -65,6 +65,19 @@ type Validator[T any] interface {
 **Helper:**
 - `ValidatorFunc[T](func(ctx context.Context, cfg *T) error)` - Function adapter
 
+## Validation Semantics
+
+Rigging distinguishes **field presence** from Go zero values during `Loader.Load`.
+
+- `required` checks whether a key was provided by any source (or default), not whether the final value is non-zero.
+- `min`, `max`, and `oneof` run for fields that are explicitly provided, even when the value is a zero value (for example, `0`, `""`, `false`).
+- Optional fields that are absent skip value constraints.
+
+Example behavior:
+
+- Absent optional `port int \`conf:"min:1"\`` -> no validation error.
+- Provided `port=0` -> `min` validation error.
+
 ## Observability
 
 ### GetProvenance
