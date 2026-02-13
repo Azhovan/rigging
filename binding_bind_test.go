@@ -240,6 +240,36 @@ func TestBindStruct_CustomName(t *testing.T) {
 	}
 }
 
+func TestBindStruct_EnvTag(t *testing.T) {
+	type Config struct {
+		DBHost string `conf:"env:DB__HOST"`
+	}
+
+	data := map[string]mergedEntry{
+		"db.host": {value: "db.example.com", sourceName: "env"},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	if cfg.DBHost != "db.example.com" {
+		t.Errorf("DBHost = %q, want %q", cfg.DBHost, "db.example.com")
+	}
+
+	hostProv := findProvenance(provFields, "DBHost")
+	if hostProv == nil {
+		t.Fatal("DBHost provenance not found")
+	}
+	if hostProv.KeyPath != "db.host" {
+		t.Errorf("DBHost key path = %q, want %q", hostProv.KeyPath, "db.host")
+	}
+}
+
 func TestBindStruct_SecretField(t *testing.T) {
 	type Config struct {
 		Password string `conf:"secret"`

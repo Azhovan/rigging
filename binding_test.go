@@ -1332,6 +1332,34 @@ func TestBinding_DetermineKeyPath(t *testing.T) {
 			parentPrefix: "parent",
 			expected:     "custom_key",
 		},
+		{
+			name:      "env tag maps to normalized env key path",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				env: "DB__PRIMARY__HOST",
+			},
+			parentPrefix: "",
+			expected:     "db.primary.host",
+		},
+		{
+			name:      "env tag ignores parent prefix",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				env: "DB__HOST",
+			},
+			parentPrefix: "database",
+			expected:     "db.host",
+		},
+		{
+			name:      "name tag takes precedence over env tag",
+			fieldName: "Host",
+			tagCfg: tagConfig{
+				name: "custom.host",
+				env:  "DB__HOST",
+			},
+			parentPrefix: "",
+			expected:     "custom.host",
+		},
 
 		// Case normalization
 		{
