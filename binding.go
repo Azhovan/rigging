@@ -27,6 +27,7 @@ type tagConfig struct {
 }
 
 var tagConfigCache sync.Map
+var optionalTypePkgPath = reflect.TypeOf(Optional[int]{}).PkgPath()
 
 func cloneTagConfig(cfg tagConfig) tagConfig {
 	if len(cfg.oneof) == 0 {
@@ -651,6 +652,13 @@ func deriveFieldKey(fieldName string) string {
 // isOptionalType checks if a type is an Optional[T] type.
 func isOptionalType(t reflect.Type) bool {
 	if t.Kind() != reflect.Struct {
+		return false
+	}
+	if t.PkgPath() != optionalTypePkgPath {
+		return false
+	}
+	name := t.Name()
+	if name != "Optional" && !strings.HasPrefix(name, "Optional[") {
 		return false
 	}
 	if t.NumField() != 2 {

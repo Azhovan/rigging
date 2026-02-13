@@ -370,6 +370,45 @@ func TestBindStruct_OptionalField(t *testing.T) {
 	})
 }
 
+func TestBindStruct_ValueSetLookalikeStructIsNotOptional(t *testing.T) {
+	type ValueSet struct {
+		Value int
+		Set   bool
+	}
+	type Config struct {
+		Flag ValueSet
+	}
+
+	data := map[string]mergedEntry{
+		"flag.value": {value: "42", sourceName: "env"},
+		"flag.set":   {value: "true", sourceName: "env"},
+	}
+
+	var cfg Config
+	var provFields []FieldProvenance
+	errors := bindStruct(reflect.ValueOf(&cfg), data, &provFields, "", "")
+
+	if len(errors) > 0 {
+		t.Fatalf("unexpected errors: %v", errors)
+	}
+
+	if cfg.Flag.Value != 42 {
+		t.Errorf("Flag.Value = %d, want %d", cfg.Flag.Value, 42)
+	}
+	if !cfg.Flag.Set {
+		t.Errorf("Flag.Set = %v, want true", cfg.Flag.Set)
+	}
+
+	valueProv := findProvenance(provFields, "Flag.Value")
+	if valueProv == nil {
+		t.Fatal("Flag.Value provenance not found")
+	}
+	setProv := findProvenance(provFields, "Flag.Set")
+	if setProv == nil {
+		t.Fatal("Flag.Set provenance not found")
+	}
+}
+
 func TestBindStruct_MultipleErrors(t *testing.T) {
 	type Config struct {
 		Host string `conf:"required"`
