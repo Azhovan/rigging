@@ -94,6 +94,12 @@ func ReleaseProvenance[T any](cfg *T)
 
 Returns provenance metadata with field-level source information.
 `ReleaseProvenance` removes stored provenance for a config instance.
+`LoadWithProvenance` returns provenance directly and does not populate global storage.
+
+Lifecycle notes:
+- `Load` stores provenance for the returned config pointer until `ReleaseProvenance` is called.
+- `Watch` keeps global provenance for the most recently emitted snapshot; when a newer snapshot is emitted, the superseded snapshot's provenance is released.
+- If you need historical provenance across snapshots, persist/copy it in your own state.
 
 ```go
 type Provenance struct {
@@ -292,6 +298,10 @@ type Snapshot[T any] struct {
     Source   string    // What triggered the load
 }
 ```
+
+Provenance note:
+- For configs emitted by `Watch`, `GetProvenance` is intended for the latest snapshot.
+- Older snapshots may no longer have global provenance after subsequent reloads.
 
 ### ChangeEvent
 

@@ -921,6 +921,72 @@ func TestWatch_ReloadOnChange(t *testing.T) {
 	}
 }
 
+func TestWatch_ReloadReleasesSupersededProvenance(t *testing.T) {
+	type Config struct {
+		Host string
+		Port int
+	}
+
+	source := newWatchableSource("test", map[string]any{
+		"host": "localhost",
+		"port": 8080,
+	})
+	defer source.close()
+
+	loader := NewLoader[Config]().WithSource(source)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	snapshots, errors, err := loader.Watch(ctx)
+	if err != nil {
+		t.Fatalf("Watch failed: %v", err)
+	}
+
+	var initial Snapshot[Config]
+	select {
+	case initial = <-snapshots:
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for initial snapshot")
+	}
+
+	if _, ok := GetProvenance(initial.Config); !ok {
+		t.Fatal("expected initial snapshot provenance to be present")
+	}
+
+	source.updateData(map[string]any{
+		"host": "example.com",
+		"port": 9090,
+	})
+	source.triggerChange("test-change")
+
+	var reloaded Snapshot[Config]
+	select {
+	case reloaded = <-snapshots:
+	case err := <-errors:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for reload snapshot")
+	}
+	t.Cleanup(func() { ReleaseProvenance(reloaded.Config) })
+
+	if _, ok := GetProvenance(reloaded.Config); !ok {
+		t.Fatal("expected reloaded snapshot provenance to be present")
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if _, ok := GetProvenance(initial.Config); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected superseded snapshot provenance to be released")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestWatch_ValidationError verifies that validation errors are sent to error channel.
 func TestWatch_ValidationError(t *testing.T) {
 	type Config struct {

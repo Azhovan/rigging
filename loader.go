@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -265,6 +266,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 
 	// Emit initial snapshot
 	currentVersion := int64(1)
+	currentCfg := initialCfg
 	snapshotCh <- Snapshot[T]{
 		Config:   initialCfg,
 		Version:  currentVersion,
@@ -311,6 +313,7 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 	// Create a debounce timer
 	var debounceTimer *time.Timer
 	const debounceDelay = 100 * time.Millisecond
+	var reloadStateMu sync.Mutex
 
 	// Merge all change channels into one
 	mergedChanges := make(chan ChangeEvent)
@@ -404,18 +407,25 @@ func (l *Loader[T]) watchLoop(ctx context.Context, initialCfg *T, snapshotCh cha
 					return
 				}
 
-				// Increment version and emit new snapshot
-				currentVersion++
+				// Serialize state transition when multiple debounce callbacks overlap.
+				reloadStateMu.Lock()
+				defer reloadStateMu.Unlock()
+
+				// Emit snapshot first; only then release the superseded provenance.
 				snapshot := Snapshot[T]{
 					Config:   newCfg,
-					Version:  currentVersion,
+					Version:  currentVersion + 1,
 					LoadedAt: time.Now(),
 					Source:   cause,
 				}
 
 				select {
 				case snapshotCh <- snapshot:
+					currentVersion++
+					ReleaseProvenance(currentCfg)
+					currentCfg = newCfg
 				case <-ctx.Done():
+					ReleaseProvenance(newCfg)
 				}
 			})
 		}
