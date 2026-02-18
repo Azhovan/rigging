@@ -31,11 +31,26 @@ type Source interface {
 }
 ```
 
+`Watch` may return `ErrWatchNotSupported` for sources that don't support runtime change events.
+
 **Built-in sources:**
 - `sourcefile.New(path string, opts sourcefile.Options)` - YAML/JSON/TOML files
 - `sourceenv.New(opts sourceenv.Options)` - Environment variables
 
 `Name()` is used in provenance output (for example, `file:config.yaml`, `env:APP_PORT`).
+
+### SourceWithKeys
+
+Optional interface for richer provenance (original source keys).
+
+```go
+type SourceWithKeys interface {
+    Source
+    LoadWithKeys(ctx context.Context) (data map[string]any, originalKeys map[string]string, err error)
+}
+```
+
+`originalKeys` maps normalized keys back to original source keys (for example, full env var names).
 
 ### Optional[T]
 
@@ -127,6 +142,12 @@ func DumpEffective[T any](w io.Writer, cfg *T, opts ...DumpOption) error
 - `AsJSON()` - Output as JSON instead of text
 - `WithIndent(indent string)` - Set JSON indentation
 
+When `AsJSON()` and `WithSources()` are combined, leaf fields are wrapped as:
+
+```json
+{"value":"...","source":"..."}
+```
+
 **Examples:**
 
 ```go
@@ -189,6 +210,15 @@ err := rigging.WriteSnapshot(snapshot, "snapshots/config-{{timestamp}}.json")
 restored, err := rigging.ReadSnapshot("snapshots/config-20240115-103000.json")
 ```
 
+### Path Helpers
+
+```go
+func ExpandPath(template string) string
+func ExpandPathWithTime(template string, t time.Time) string
+```
+
+`WriteSnapshot` uses the snapshot's internal `Timestamp` when expanding `{{timestamp}}` to keep filename and snapshot metadata consistent.
+
 ### ConfigSnapshot
 
 ```go
@@ -250,6 +280,7 @@ Configure binding and validation with the `conf` tag:
 | Tag | Description | Example |
 |-----|-------------|---------|
 | `required` | Field must have a value | `conf:"required"` |
+| `env:VAR` | Bind from an explicit env-style key path (normalized with `__` -> `.` and lowercased) | `conf:"env:APP__DATABASE__HOST"` |
 | `default:X` | Default value if not provided | `conf:"default:8080"` |
 | `min:N` | Minimum value (numeric) or length (string) | `conf:"min:1024"` |
 | `max:N` | Maximum value (numeric) or length (string) | `conf:"max:65535"` |
@@ -271,9 +302,9 @@ type Config struct {
 **Tag precedence:**
 
 - `name:` overrides all key derivation (ignores `prefix:` and field name)
-- `prefix:` applies to nested struct fields
-- Without `name:`, keys are derived from field names (snake_case)
-- Environment normalization converts `__` to `.` and preserves single `_` (after prefix stripping)
+- `env:` is used when `name:` is not set
+- otherwise keys are derived from field names (snake_case), with parent `prefix:` for nested structs
+- env-style normalization converts `__` to `.` and preserves single `_`
 
 ```go
 type Config struct {
@@ -299,6 +330,10 @@ type Snapshot[T any] struct {
 }
 ```
 
+Watch behavior:
+- `Watch` emits an initial snapshot immediately (`Version=1`, `Source="initial"`).
+- Reloads from source change events are debounced by 100ms.
+
 Provenance note:
 - For configs emitted by `Watch`, `GetProvenance` is intended for the latest snapshot.
 - Older snapshots may no longer have global provenance after subsequent reloads.
@@ -313,6 +348,8 @@ type ChangeEvent struct {
     Cause string    // Description of the change
 }
 ```
+
+`ErrWatchNotSupported` is returned by `Source.Watch` for sources that don't support watch mode.
 
 ## Strict Mode
 

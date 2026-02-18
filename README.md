@@ -87,6 +87,7 @@ Enforce validation rules at startup. All configuration is validated before your 
 type Config struct {
     Environment string `conf:"required,oneof:prod,staging,dev"`
     Database struct {
+        Host string `conf:"required"`
         Port int `conf:"min:1024,max:65535"`
     } `conf:"prefix:database"`
 }

@@ -54,7 +54,8 @@ source := sourcefile.New("config.yaml", sourcefile.Options{
 
 Important:
 - Env source strips the configured prefix first, then preserves single underscores and converts `__` to `.`.
-- File source does not rewrite separators; it flattens and lowercases keys.
+- File source flattens nested objects but does not rewrite separators.
+- Rigging lowercases keys during loader merge for consistent matching across sources.
 - If your file keys are snake_case, use `name:` tags to match them.
 
 ```go
@@ -131,6 +132,10 @@ for snapshots != nil || errors != nil {
     }
 }
 ```
+
+Behavior notes:
+- `Watch` emits an initial snapshot immediately (`Version=1`, `Source="initial"`).
+- Subsequent reloads are debounced for 100ms.
 
 Production notes:
 - Keep a "last good config" in your app and only swap it after successful `applyNewConfig`.
