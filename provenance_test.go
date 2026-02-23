@@ -366,6 +366,63 @@ func TestProvenance_WithoutSourceKeys(t *testing.T) {
 	}
 }
 
+func TestProvenance_SynthesizedMapFieldKeepsSourceLevelProvenanceForEnvKeys(t *testing.T) {
+	type ClickHouseConfig struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		ClickhouseMap map[string]ClickHouseConfig
+	}
+
+	source := &mockSourceWithKeys{
+		name: "env:APP_",
+		data: map[string]any{
+			"clickhouse_map.primary.host": "ch1",
+			"clickhouse_map.primary.port": 9000,
+			"clickhouse_map.replica.host": "ch2",
+			"clickhouse_map.replica.port": 9001,
+		},
+		originalKeys: map[string]string{
+			"clickhouse_map.primary.host": "APP_CLICKHOUSE_MAP__PRIMARY__HOST",
+			"clickhouse_map.primary.port": "APP_CLICKHOUSE_MAP__PRIMARY__PORT",
+			"clickhouse_map.replica.host": "APP_CLICKHOUSE_MAP__REPLICA__HOST",
+			"clickhouse_map.replica.port": "APP_CLICKHOUSE_MAP__REPLICA__PORT",
+		},
+	}
+
+	cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.ClickhouseMap) != 2 {
+		t.Fatalf("expected 2 map entries, got %d", len(cfg.ClickhouseMap))
+	}
+
+	prov, ok := GetProvenance(cfg)
+	if !ok {
+		t.Fatal("provenance not found for config")
+	}
+
+	var mapFieldProv *FieldProvenance
+	for i := range prov.Fields {
+		if prov.Fields[i].FieldPath == "ClickhouseMap" {
+			mapFieldProv = &prov.Fields[i]
+			break
+		}
+	}
+
+	if mapFieldProv == nil {
+		t.Fatalf("expected provenance entry for ClickhouseMap, got %#v", prov.Fields)
+	}
+
+	if mapFieldProv.SourceName != "env:APP_" {
+		t.Fatalf("expected source-level provenance %q, got %q", "env:APP_", mapFieldProv.SourceName)
+	}
+}
+
 // TestProvenance_MultipleSources verifies that provenance tracks which source provided each value.
 func TestProvenance_MultipleSources(t *testing.T) {
 	type Config struct {
