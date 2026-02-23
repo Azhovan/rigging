@@ -745,19 +745,18 @@ func TestLoad_NestedCollections(t *testing.T) {
 		ClickhouseMap  map[string]ClickHouseConfig
 	}
 
-	t.Run("binds slice and map from yaml-shaped data", func(t *testing.T) {
+	t.Run("binds slice and direct map values", func(t *testing.T) {
 		source := &mockSource{
 			data: map[string]any{
 				"clickhouse_list": []any{
 					map[string]any{"host": "ch1", "port": 9000},
 					map[string]any{"host": "ch2", "port": 9001},
 				},
-				"clickhouse_map.primary.host":   "ch1",
-				"clickhouse_map.primary.port":   9000,
-				"clickhouse_map.replica.host":   "ch2",
-				"clickhouse_map.replica.port":   9001,
-				"clickhouse_map.analytics.host": "ch3",
-				"clickhouse_map.analytics.port": 9002,
+				"clickhouse_map": map[string]any{
+					"primary":   map[string]any{"host": "ch1", "port": 9000},
+					"replica":   map[string]any{"host": "ch2", "port": 9001},
+					"analytics": map[string]any{"host": "ch3", "port": 9002},
+				},
 			},
 		}
 
@@ -781,39 +780,6 @@ func TestLoad_NestedCollections(t *testing.T) {
 		}
 		if !reflect.DeepEqual(cfg.ClickhouseMap, wantMap) {
 			t.Errorf("ClickhouseMap = %#v, want %#v", cfg.ClickhouseMap, wantMap)
-		}
-	})
-
-	t.Run("strict mode rejects unknown nested key in map value", func(t *testing.T) {
-		source := &mockSource{
-			data: map[string]any{
-				"clickhouse_map.primary.host":    "ch1",
-				"clickhouse_map.primary.port":    9000,
-				"clickhouse_map.primary.unknown": "bad",
-			},
-		}
-
-		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
-		if err == nil {
-			t.Fatal("expected strict-mode error for unknown nested map key")
-		}
-		if cfg != nil {
-			t.Fatal("expected nil cfg when strict-mode validation fails")
-		}
-
-		valErr, ok := err.(*ValidationError)
-		if !ok {
-			t.Fatalf("expected ValidationError, got %T", err)
-		}
-
-		foundUnknown := false
-		for _, fieldErr := range valErr.FieldErrors {
-			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_map.primary.unknown" {
-				foundUnknown = true
-			}
-		}
-		if !foundUnknown {
-			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
 		}
 	})
 

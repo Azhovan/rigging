@@ -111,12 +111,11 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		// Get all valid field keys from the struct
 		var cfg T
 		validKeys := collectValidKeys(reflect.TypeOf(cfg), "")
-		dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(reflect.TypeOf(cfg), "")
 
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
 		for key := range mergedData {
-			if !validKeys[key] && !matchesDynamicMapKeyPattern(key, dynamicMapKeyPatterns) {
+			if !validKeys[key] {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
@@ -256,114 +255,6 @@ func collectValidKeys(t reflect.Type, prefix string) map[string]bool {
 	}
 
 	return validKeys
-}
-
-func collectDynamicMapKeyPatterns(t reflect.Type, prefix string) []string {
-	patternSet := make(map[string]struct{})
-
-	var walk func(reflect.Type, string)
-	walk = func(currType reflect.Type, currPrefix string) {
-		if currType.Kind() == reflect.Ptr {
-			currType = currType.Elem()
-		}
-		if currType.Kind() != reflect.Struct {
-			return
-		}
-
-		for _, meta := range getStructFieldMeta(currType) {
-			field := meta.field
-			tagCfg := meta.tagCfg
-			keyPath := determineKeyPath(field.Name, tagCfg, currPrefix)
-
-			fieldType := field.Type
-			unwrappedType := fieldType
-			if isOptionalType(unwrappedType) {
-				unwrappedType = unwrappedType.Field(0).Type
-			}
-
-			if unwrappedType.Kind() == reflect.Map && unwrappedType.Key().Kind() == reflect.String {
-				for _, pattern := range collectMapValueKeyPatterns(keyPath, unwrappedType.Elem()) {
-					patternSet[pattern] = struct{}{}
-				}
-			}
-
-			if isOptionalType(fieldType) {
-				innerType := fieldType.Field(0).Type
-				if innerType.Kind() == reflect.Struct {
-					walk(innerType, keyPath)
-				}
-				continue
-			}
-
-			if fieldType.Kind() != reflect.Struct || fieldType.PkgPath() == "time" {
-				continue
-			}
-
-			nestedPrefix := keyPath
-			if tagCfg.prefix != "" {
-				nestedPrefix = tagCfg.prefix
-			}
-			walk(fieldType, nestedPrefix)
-		}
-	}
-
-	walk(t, prefix)
-
-	patterns := make([]string, 0, len(patternSet))
-	for pattern := range patternSet {
-		patterns = append(patterns, pattern)
-	}
-
-	return patterns
-}
-
-func collectMapValueKeyPatterns(baseKey string, valueType reflect.Type) []string {
-	if valueType.Kind() == reflect.Ptr {
-		valueType = valueType.Elem()
-	}
-
-	if isOptionalType(valueType) {
-		valueType = valueType.Field(0).Type
-	}
-
-	if valueType.Kind() == reflect.Struct && valueType.PkgPath() != "time" {
-		patterns := make([]string, 0)
-		for key := range collectValidKeys(valueType, baseKey+".*") {
-			patterns = append(patterns, key)
-		}
-		return patterns
-	}
-
-	return []string{baseKey + ".*"}
-}
-
-func matchesDynamicMapKeyPattern(key string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if matchDotKeyPattern(pattern, key) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func matchDotKeyPattern(pattern string, key string) bool {
-	patternParts := strings.Split(pattern, ".")
-	keyParts := strings.Split(key, ".")
-	if len(patternParts) != len(keyParts) {
-		return false
-	}
-
-	for i := range patternParts {
-		if patternParts[i] == "*" {
-			continue
-		}
-		if patternParts[i] != keyParts[i] {
-			return false
-		}
-	}
-
-	return true
 }
 
 // watchLoop is the main goroutine that monitors sources for changes and reloads configuration.
