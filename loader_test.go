@@ -734,6 +734,127 @@ func TestLoad_NestedStruct(t *testing.T) {
 	}
 }
 
+func TestLoad_NestedCollections(t *testing.T) {
+	type ClickHouseConfig struct {
+		Host string
+		Port int
+	}
+
+	type Config struct {
+		ClickhouseList []ClickHouseConfig
+		ClickhouseMap  map[string]ClickHouseConfig
+	}
+
+	t.Run("binds slice and map from yaml-shaped data", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_list": []any{
+					map[string]any{"host": "ch1", "port": 9000},
+					map[string]any{"host": "ch2", "port": 9001},
+				},
+				"clickhouse_map.primary.host":   "ch1",
+				"clickhouse_map.primary.port":   9000,
+				"clickhouse_map.replica.host":   "ch2",
+				"clickhouse_map.replica.port":   9001,
+				"clickhouse_map.analytics.host": "ch3",
+				"clickhouse_map.analytics.port": 9002,
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		wantList := []ClickHouseConfig{
+			{Host: "ch1", Port: 9000},
+			{Host: "ch2", Port: 9001},
+		}
+		if !reflect.DeepEqual(cfg.ClickhouseList, wantList) {
+			t.Errorf("ClickhouseList = %#v, want %#v", cfg.ClickhouseList, wantList)
+		}
+
+		wantMap := map[string]ClickHouseConfig{
+			"primary":   {Host: "ch1", Port: 9000},
+			"replica":   {Host: "ch2", Port: 9001},
+			"analytics": {Host: "ch3", Port: 9002},
+		}
+		if !reflect.DeepEqual(cfg.ClickhouseMap, wantMap) {
+			t.Errorf("ClickhouseMap = %#v, want %#v", cfg.ClickhouseMap, wantMap)
+		}
+	})
+
+	t.Run("strict mode rejects unknown nested key in map value", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map.primary.host":    "ch1",
+				"clickhouse_map.primary.port":    9000,
+				"clickhouse_map.primary.unknown": "bad",
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested map key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_map.primary.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
+	t.Run("invalid nested collection type reports invalid_type", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_list": []any{
+					map[string]any{"host": "ch1", "port": "not-an-int"},
+				},
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected invalid_type error")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg on invalid_type error")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+		if len(valErr.FieldErrors) == 0 {
+			t.Fatal("expected at least one field error")
+		}
+
+		fieldErr := valErr.FieldErrors[0]
+		if fieldErr.Code != ErrCodeInvalidType {
+			t.Fatalf("expected code %q, got %q", ErrCodeInvalidType, fieldErr.Code)
+		}
+		if fieldErr.FieldPath != "ClickhouseList" {
+			t.Fatalf("expected FieldPath %q, got %q", "ClickhouseList", fieldErr.FieldPath)
+		}
+		if !strings.Contains(fieldErr.Message, "slice element 0") {
+			t.Fatalf("expected index context in error message, got %q", fieldErr.Message)
+		}
+	})
+}
+
 // TestLoad_SourceError verifies that source load errors are propagated.
 func TestLoad_SourceError(t *testing.T) {
 	type Config struct {

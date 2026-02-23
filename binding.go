@@ -387,15 +387,89 @@ func convertValue(rawValue any, targetType reflect.Type) (any, error) {
 		return val, nil
 
 	case reflect.Slice:
-		// Handle []string
+		// Preserve the existing []string convenience behavior (comma-separated strings).
 		if targetType.Elem().Kind() == reflect.String {
 			return parseStringSlice(rawValue)
 		}
-		return nil, fmt.Errorf("unsupported slice type: %s", targetType)
+
+		rawValueRef := reflect.ValueOf(rawValue)
+		if rawValueRef.Kind() != reflect.Slice && rawValueRef.Kind() != reflect.Array {
+			return nil, fmt.Errorf("cannot convert %T to %s", rawValue, targetType)
+		}
+
+		result := reflect.MakeSlice(targetType, rawValueRef.Len(), rawValueRef.Len())
+		for i := 0; i < rawValueRef.Len(); i++ {
+			elem, err := convertCollectionElement(rawValueRef.Index(i).Interface(), targetType.Elem())
+			if err != nil {
+				return nil, fmt.Errorf("cannot convert slice element %d: %w", i, err)
+			}
+			result.Index(i).Set(reflect.ValueOf(elem))
+		}
+		return result.Interface(), nil
+
+	case reflect.Map:
+		if targetType.Key().Kind() != reflect.String {
+			return nil, fmt.Errorf("unsupported map key type: %s", targetType.Key())
+		}
+
+		rawValueRef := reflect.ValueOf(rawValue)
+		if rawValueRef.Kind() != reflect.Map {
+			return nil, fmt.Errorf("cannot convert %T to %s", rawValue, targetType)
+		}
+
+		result := reflect.MakeMapWithSize(targetType, rawValueRef.Len())
+		for _, rawKey := range rawValueRef.MapKeys() {
+			if rawKey.Kind() != reflect.String {
+				return nil, fmt.Errorf("cannot convert map key type %s to string", rawKey.Type())
+			}
+
+			elem, err := convertCollectionElement(rawValueRef.MapIndex(rawKey).Interface(), targetType.Elem())
+			if err != nil {
+				return nil, fmt.Errorf("cannot convert map value for key %q: %w", rawKey.String(), err)
+			}
+			result.SetMapIndex(reflect.ValueOf(rawKey.String()).Convert(targetType.Key()), reflect.ValueOf(elem))
+		}
+		return result.Interface(), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)
 	}
+}
+
+func convertCollectionElement(rawValue any, targetType reflect.Type) (any, error) {
+	// Collection elements/values that are structs need real binding, not "return raw map as-is".
+	if rawValue != nil &&
+		targetType.Kind() == reflect.Struct &&
+		targetType != timeType &&
+		targetType != durationType &&
+		!isOptionalType(targetType) {
+		return convertStructValue(rawValue, targetType)
+	}
+
+	return convertValue(rawValue, targetType)
+}
+
+func convertStructValue(rawValue any, targetType reflect.Type) (any, error) {
+	rawValueRef := reflect.ValueOf(rawValue)
+	if !rawValueRef.IsValid() || rawValueRef.Kind() != reflect.Map {
+		return convertValue(rawValue, targetType)
+	}
+
+	nestedData := make(map[string]mergedEntry, rawValueRef.Len())
+	for _, rawKey := range rawValueRef.MapKeys() {
+		if rawKey.Kind() != reflect.String {
+			return nil, fmt.Errorf("cannot bind nested struct %s with non-string key type %s", targetType, rawKey.Type())
+		}
+		nestedData[strings.ToLower(rawKey.String())] = mergedEntry{value: rawValueRef.MapIndex(rawKey).Interface()}
+	}
+
+	nestedTarget := reflect.New(targetType).Elem()
+	fieldErrors := bindStruct(nestedTarget, nestedData, nil, "", "")
+	if len(fieldErrors) > 0 {
+		return nil, fmt.Errorf("cannot bind nested struct %s at %s: %s", targetType, fieldErrors[0].FieldPath, fieldErrors[0].Message)
+	}
+
+	return nestedTarget.Interface(), nil
 }
 
 // parseBool parses a boolean value from a string.
@@ -441,6 +515,70 @@ func parseStringSlice(rawValue any) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("cannot convert %T to []string", rawValue)
 	}
+}
+
+func synthesizeNestedMapEntry(data map[string]mergedEntry, keyPath string) (mergedEntry, bool) {
+	prefix := keyPath + "."
+	nested := make(map[string]any)
+
+	var sourceName string
+	var sourceKey string
+	found := false
+	mixedSources := false
+
+	for dataKey, entry := range data {
+		if !strings.HasPrefix(dataKey, prefix) {
+			continue
+		}
+
+		parts := strings.Split(strings.TrimPrefix(dataKey, prefix), ".")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+
+		setNestedMapValue(nested, parts, entry.value)
+		if !found {
+			sourceName = entry.sourceName
+			sourceKey = entry.sourceKey
+			found = true
+			continue
+		}
+
+		if sourceName != entry.sourceName || sourceKey != entry.sourceKey {
+			mixedSources = true
+		}
+	}
+
+	if !found {
+		return mergedEntry{}, false
+	}
+
+	if mixedSources {
+		// A single field-level provenance source would be misleading for a synthesized mixed-source map.
+		sourceName = ""
+		sourceKey = ""
+	}
+
+	return mergedEntry{
+		value:      nested,
+		sourceName: sourceName,
+		sourceKey:  sourceKey,
+	}, true
+}
+
+func setNestedMapValue(dst map[string]any, parts []string, value any) {
+	if len(parts) == 1 {
+		dst[parts[0]] = value
+		return
+	}
+
+	child, ok := dst[parts[0]].(map[string]any)
+	if !ok {
+		child = make(map[string]any)
+		dst[parts[0]] = child
+	}
+
+	setNestedMapValue(child, parts[1:], value)
 }
 
 // mergedEntry represents a configuration value with its source information.
@@ -564,6 +702,13 @@ func bindScalarField(
 	var rawValue any
 	var sourceName string
 
+	if !found && fieldValue.Kind() == reflect.Map {
+		if synthesizedEntry, ok := synthesizeNestedMapEntry(data, keyPath); ok {
+			entry = synthesizedEntry
+			found = true
+		}
+	}
+
 	if found {
 		rawValue = entry.value
 		sourceName = entry.sourceName
@@ -599,7 +744,7 @@ func bindScalarField(
 	if fieldValue.CanSet() {
 		fieldValue.Set(reflect.ValueOf(convertedValue))
 
-		if provenanceFields != nil {
+		if provenanceFields != nil && sourceName != "" {
 			sourceInfo := sourceName
 			if found && entry.sourceKey != "" {
 				sourceInfo = entry.sourceKey
