@@ -42,6 +42,48 @@ source := sourcefile.New("config.yaml", sourcefile.Options{
 - Nested objects are flattened to dot paths (`database.host`)
 - Missing file returns empty map unless `Required: true`
 
+### Nested Collections from File Sources
+
+Rigging can bind nested collection fields from file-source values, including common YAML shapes for slices and dynamic named maps.
+
+Example schema:
+
+```go
+type ClickHouseConfig struct {
+    Host string
+    Port int
+}
+
+type Config struct {
+    ClickhouseList []ClickHouseConfig
+    ClickhouseMap  map[string]ClickHouseConfig
+}
+```
+
+Example YAML:
+
+```yaml
+clickhouse_list:
+  - host: ch1
+    port: 9000
+  - host: ch2
+    port: 9000
+
+clickhouse_map:
+  primary:
+    host: ch1
+    port: 9000
+  replica:
+    host: ch2
+    port: 9000
+```
+
+Behavior notes:
+- `[]Struct` fields (for example, `[]ClickHouseConfig`) bind from YAML arrays of nested objects.
+- `map[string]Struct` fields (for example, `map[string]ClickHouseConfig`) bind from nested YAML maps even though the file source flattens them to dotted keys (for example, `clickhouse_map.primary.host`).
+- In strict mode, valid nested keys under dynamic map entries are accepted (for example, `clickhouse_map.primary.host`), but unknown nested fields are rejected (for example, `clickhouse_map.primary.unknown`).
+- With `Strict(false)`, unknown nested keys do not fail the load.
+
 ## Key Normalization by Source
 
 | Source | Example input | Normalized key |

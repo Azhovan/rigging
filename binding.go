@@ -517,6 +517,77 @@ func parseStringSlice(rawValue any) ([]string, error) {
 	}
 }
 
+func synthesizeNestedMapEntry(data map[string]mergedEntry, keyPath string) (mergedEntry, bool) {
+	prefix := keyPath + "."
+	nested := make(map[string]any)
+
+	var sourceName string
+	var sourceKey string
+	found := false
+	mixedSourceNames := false
+	mixedSourceKeys := false
+
+	for dataKey, entry := range data {
+		if !strings.HasPrefix(dataKey, prefix) {
+			continue
+		}
+
+		parts := strings.Split(strings.TrimPrefix(dataKey, prefix), ".")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+
+		setNestedMapValue(nested, parts, entry.value)
+		if !found {
+			sourceName = entry.sourceName
+			sourceKey = entry.sourceKey
+			found = true
+			continue
+		}
+
+		if sourceName != entry.sourceName {
+			mixedSourceNames = true
+		}
+		if sourceKey != entry.sourceKey {
+			mixedSourceKeys = true
+		}
+	}
+
+	if !found {
+		return mergedEntry{}, false
+	}
+
+	if mixedSourceNames {
+		// A single field-level provenance source would be misleading for a synthesized mixed-source map.
+		sourceName = ""
+		sourceKey = ""
+	} else if mixedSourceKeys {
+		// Keep source-level provenance, but don't imply one source key/variable produced the whole map.
+		sourceKey = ""
+	}
+
+	return mergedEntry{
+		value:      nested,
+		sourceName: sourceName,
+		sourceKey:  sourceKey,
+	}, true
+}
+
+func setNestedMapValue(dst map[string]any, parts []string, value any) {
+	if len(parts) == 1 {
+		dst[parts[0]] = value
+		return
+	}
+
+	child, ok := dst[parts[0]].(map[string]any)
+	if !ok {
+		child = make(map[string]any)
+		dst[parts[0]] = child
+	}
+
+	setNestedMapValue(child, parts[1:], value)
+}
+
 // mergedEntry represents a configuration value with its source information.
 type mergedEntry struct {
 	value      any
@@ -638,6 +709,13 @@ func bindScalarField(
 	var rawValue any
 	var sourceName string
 
+	if !found && fieldValue.Kind() == reflect.Map {
+		if synthesizedEntry, ok := synthesizeNestedMapEntry(data, keyPath); ok {
+			entry = synthesizedEntry
+			found = true
+		}
+	}
+
 	if found {
 		rawValue = entry.value
 		sourceName = entry.sourceName
@@ -673,7 +751,7 @@ func bindScalarField(
 	if fieldValue.CanSet() {
 		fieldValue.Set(reflect.ValueOf(convertedValue))
 
-		if provenanceFields != nil {
+		if provenanceFields != nil && sourceName != "" {
 			sourceInfo := sourceName
 			if found && entry.sourceKey != "" {
 				sourceInfo = entry.sourceKey

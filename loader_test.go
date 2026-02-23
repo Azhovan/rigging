@@ -783,6 +783,88 @@ func TestLoad_NestedCollections(t *testing.T) {
 		}
 	})
 
+	t.Run("binds flattened dotted keys into map values in strict mode", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map.primary.host":   "ch1",
+				"clickhouse_map.primary.port":   9000,
+				"clickhouse_map.replica.host":   "ch2",
+				"clickhouse_map.replica.port":   9001,
+				"clickhouse_map.analytics.host": "ch3",
+				"clickhouse_map.analytics.port": 9002,
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		wantMap := map[string]ClickHouseConfig{
+			"primary":   {Host: "ch1", Port: 9000},
+			"replica":   {Host: "ch2", Port: 9001},
+			"analytics": {Host: "ch3", Port: 9002},
+		}
+		if !reflect.DeepEqual(cfg.ClickhouseMap, wantMap) {
+			t.Errorf("ClickhouseMap = %#v, want %#v", cfg.ClickhouseMap, wantMap)
+		}
+	})
+
+	t.Run("strict mode rejects unknown nested key in flattened map value", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map.primary.host":    "ch1",
+				"clickhouse_map.primary.port":    9000,
+				"clickhouse_map.primary.unknown": "bad",
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested map key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_map.primary.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
+	t.Run("strict mode disabled ignores unknown nested key in flattened map value", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map.primary.host":    "ch1",
+				"clickhouse_map.primary.port":    9000,
+				"clickhouse_map.primary.unknown": "ignored",
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Strict(false).Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed with strict=false: %v", err)
+		}
+
+		wantMap := map[string]ClickHouseConfig{
+			"primary": {Host: "ch1", Port: 9000},
+		}
+		if !reflect.DeepEqual(cfg.ClickhouseMap, wantMap) {
+			t.Errorf("ClickhouseMap = %#v, want %#v", cfg.ClickhouseMap, wantMap)
+		}
+	})
+
 	t.Run("invalid nested collection type reports invalid_type", func(t *testing.T) {
 		source := &mockSource{
 			data: map[string]any{
@@ -817,6 +899,42 @@ func TestLoad_NestedCollections(t *testing.T) {
 		}
 		if !strings.Contains(fieldErr.Message, "slice element 0") {
 			t.Fatalf("expected index context in error message, got %q", fieldErr.Message)
+		}
+	})
+
+	t.Run("invalid flattened map value type reports invalid_type", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map.primary.host": "ch1",
+				"clickhouse_map.primary.port": "not-an-int",
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected invalid_type error")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg on invalid_type error")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+		if len(valErr.FieldErrors) == 0 {
+			t.Fatal("expected at least one field error")
+		}
+
+		fieldErr := valErr.FieldErrors[0]
+		if fieldErr.Code != ErrCodeInvalidType {
+			t.Fatalf("expected code %q, got %q", ErrCodeInvalidType, fieldErr.Code)
+		}
+		if fieldErr.FieldPath != "ClickhouseMap" {
+			t.Fatalf("expected FieldPath %q, got %q", "ClickhouseMap", fieldErr.FieldPath)
+		}
+		if !strings.Contains(fieldErr.Message, "map value for key") {
+			t.Fatalf("expected map key context in error message, got %q", fieldErr.Message)
 		}
 	})
 }
