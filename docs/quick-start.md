@@ -5,9 +5,7 @@ This guide gets you from zero to a successful load with validation, provenance, 
 ## 1. Install
 
 ```bash
-go get github.com/Azhovan/rigging
-go get github.com/Azhovan/rigging/sourcefile
-go get github.com/Azhovan/rigging/sourceenv
+go get github.com/Azhovan/rigging@latest
 ```
 
 ## 2. Define a Typed Schema
@@ -80,6 +78,22 @@ rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
 
 Secrets tagged with `conf:"secret"` are redacted.
 
+### Snapshot for debugging and audits
+
+```go
+snapshot, err := rigging.CreateSnapshot(cfg)
+if err != nil {
+    log.Fatal(err)
+}
+
+if err := rigging.WriteSnapshot(snapshot, "snapshots/config-{{timestamp}}.json"); err != nil {
+    log.Fatal(err)
+}
+```
+
+Snapshots include flattened config values, provenance, and secret redaction.
+Use `WithExcludeFields(...)` to omit noisy fields when sharing or storing snapshots.
+
 ## 6. Key Mapping Rules (Important)
 
 Rigging matches using normalized lowercase key paths.
@@ -107,9 +121,49 @@ type Config struct {
 }
 ```
 
+If you need to bind a field to a specific environment-style key path, use `env:` (for example, `conf:"env:APP__DATABASE__HOST"`).
+
 ## 7. Fail-Fast Validation
 
-Tag validation and custom validators run during `Load`:
+Tag validation and custom validators run during `Load`.
+
+### Typed transforms (before tag validation)
+
+Use `WithTransformer(...)` when you need to normalize or derive typed values before tag validation runs.
+This is useful for canonicalization such as trimming whitespace or normalizing enum casing.
+
+```go
+loader.WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+    cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
+    return nil
+}))
+```
+
+Use typed transforms for post-bind value normalization.
+For source key aliasing/normalization (for example renaming keys before strict mode), use a custom source wrapper instead.
+
+### Optional fields (`Optional[T]`)
+
+Use `rigging.Optional[T]` when you need to distinguish "not set" from a zero value (`false`, `0`, `""`).
+
+```go
+type Config struct {
+    Features struct {
+        EnableMetrics rigging.Optional[bool]
+        RateLimit     rigging.Optional[int] `conf:"min:1"`
+    } `conf:"prefix:features"`
+}
+```
+
+```go
+if rateLimit, ok := cfg.Features.RateLimit.Get(); ok {
+    log.Printf("rate limit explicitly set: %d", rateLimit)
+} else {
+    log.Printf("rate limit not set")
+}
+```
+
+### Custom validators (after tag validation)
 
 ```go
 loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
@@ -128,3 +182,4 @@ If validation fails, `Load` returns a `*rigging.ValidationError` with all field 
 - Tag strategy and schema patterns: [Configuration Patterns](patterns.md)
 - Full API details: [API Reference](api-reference.md)
 - Runnable demo: [`examples/basic`](../examples/basic)
+- Transformer demo: [`examples/transformer`](../examples/transformer)

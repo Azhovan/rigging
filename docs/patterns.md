@@ -48,7 +48,41 @@ type Config struct {
 }
 ```
 
-## 4. Validate at Startup, Not Mid-Request
+Use `env:` when you need a field to bind to a specific environment-style key path without changing your general source strategy.
+This is useful during migrations or when a legacy env variable name must be preserved.
+
+```go
+type Config struct {
+    DatabaseHost string `conf:"env:APP__DATABASE__HOST,required"`
+}
+```
+
+`env:` normalizes env-style syntax (`__` -> `.`, lowercased) before matching.
+Prefer `name:` for general cross-source key mapping; use `env:` when the intent is specifically env-key compatibility.
+
+## 4. Normalize Typed Values Before Validation
+
+Use typed transforms for startup-time canonicalization of already-bound values.
+This keeps normalization logic out of request paths and lets tag validation operate on canonical values.
+
+```go
+loader := rigging.NewLoader[Config]().
+    WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+        cfg.Env = strings.ToLower(strings.TrimSpace(cfg.Env))
+        return nil
+    }))
+```
+
+Typical uses:
+- trim and lowercase enum-like strings before `oneof` validation
+- derive convenience fields from typed config values
+- dedupe/sort lists before custom validation or downstream use
+
+Important:
+- `WithTransformer(...)` is for typed value normalization after binding/defaults/conversion.
+- source key aliasing or key normalization belongs in sources/source wrappers, not typed transforms.
+
+## 5. Validate at Startup, Not Mid-Request
 
 ```go
 type Config struct {
@@ -66,7 +100,7 @@ loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg
 
 Treat config load as a startup gate.
 
-## 5. Mark and Handle Secrets Explicitly
+## 6. Mark and Handle Secrets Explicitly
 
 ```go
 type Config struct {
@@ -84,7 +118,7 @@ snapshot, _ := rigging.CreateSnapshot(cfg)
 
 Secrets are redacted in dump/snapshot outputs.
 
-## 6. Use Provenance During Incident Response
+## 7. Use Provenance During Incident Response
 
 ```go
 prov, _ := rigging.GetProvenance(cfg)
@@ -95,7 +129,7 @@ for _, field := range prov.Fields {
 
 This quickly answers "why is this value set?" without guesswork.
 
-## 7. Provenance Lifecycle for Long-Lived Processes
+## 8. Provenance Lifecycle for Long-Lived Processes
 
 If you do not want global provenance retention:
 
@@ -109,3 +143,50 @@ Or release after use:
 ```go
 rigging.ReleaseProvenance(cfg)
 ```
+
+## 9. Use `Optional[T]` When Absence Differs from Zero
+
+Use `rigging.Optional[T]` for fields where "not set" must be distinct from valid zero values.
+This is common for feature flags (`false` vs unset) and numeric limits (`0` vs unset).
+
+```go
+type Config struct {
+    Features struct {
+        EnableMetrics rigging.Optional[bool]
+        RateLimit     rigging.Optional[int] `conf:"min:1"`
+    } `conf:"prefix:features"`
+}
+```
+
+```go
+if enabled, ok := cfg.Features.EnableMetrics.Get(); ok {
+    log.Printf("metrics explicitly set to %v", enabled)
+} else {
+    log.Printf("metrics flag not set")
+}
+```
+
+Notes:
+- `Optional[T]` works well when defaults should be applied by application logic rather than config tags.
+- Tag validation still applies when the optional value is set (for example `min:1` on `Optional[int]`).
+
+## 10. Capture Snapshots for Incident Response and Change Review
+
+Snapshots give you a point-in-time, redacted, provenance-aware record of effective configuration.
+Use them when debugging environment drift, reviewing rollout changes, or attaching config state to incident artifacts.
+
+```go
+snapshot, err := rigging.CreateSnapshot(cfg)
+if err != nil {
+    return err
+}
+
+if err := rigging.WriteSnapshot(snapshot, "snapshots/config-{{timestamp}}.json"); err != nil {
+    return err
+}
+```
+
+Tips:
+- Secrets are redacted automatically in snapshots.
+- Use `WithExcludeFields(...)` to omit noisy or non-essential fields from snapshots.
+- Keep snapshots outside request paths; they are a diagnostic/audit tool, not a per-request operation.

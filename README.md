@@ -79,9 +79,9 @@ rigging.WriteSnapshot(snapshot, "config-{{timestamp}}.json")
 // Creates: config-20240115-103000.json with secrets redacted
 ```
 
-### 3. Policy-Driven Validation
+### 3. Policy-Driven Loading and Validation
 
-Enforce validation rules at startup. All configuration is validated before your application runs.
+Enforce configuration policy at startup. Rigging supports both typed transforms (for normalization/canonicalization) and validation rules, so configuration is prepared and checked before your application runs.
 
 ```go
 type Config struct {
@@ -104,6 +104,19 @@ cfg, err := loader.Load(ctx)
 // If we reach here, all validation passed
 ```
 
+Use `WithTransformer(...)` to normalize or derive typed values before tag validation, and `WithValidator(...)` for cross-field or business-rule checks after tag validation.
+
+For example, a transformer can normalize `" PROD "` to `"prod"` before a `oneof:prod,staging,dev` tag check runs:
+
+```go
+loader := rigging.NewLoader[Config]().
+    WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"})).
+    WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+        cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
+        return nil
+    }))
+```
+
 ## Comparison with Other Libraries
 
 | Feature | Rigging | Viper | envconfig |
@@ -121,14 +134,7 @@ cfg, err := loader.Load(ctx)
 ## Installation
 
 ```bash
-# Core library (zero dependencies)
-go get github.com/Azhovan/rigging
-
-# File support (YAML/JSON/TOML)
-go get github.com/Azhovan/rigging/sourcefile
-
-# Environment variables
-go get github.com/Azhovan/rigging/sourceenv
+go get github.com/Azhovan/rigging@latest
 ```
 
 ## Documentation

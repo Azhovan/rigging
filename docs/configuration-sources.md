@@ -106,6 +106,12 @@ type Config struct {
 }
 ```
 
+Typed transforms are a separate stage from source key normalization:
+- Source normalization/aliasing changes keys before merge/strict mode (this page).
+- `WithTransformer(...)` normalizes typed values after binding/defaults/conversion and before tag validation.
+
+See [API Reference](api-reference.md) (`Load Pipeline`, `Transformer[T]`) and [Configuration Patterns](patterns.md) for when to use typed transforms.
+
 ## Key Mapping + Precedence + `required` Decision Table
 
 | Situation | Result | Validation outcome |

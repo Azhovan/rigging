@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Azhovan/rigging"
@@ -122,6 +123,33 @@ func ExampleLoader_WithValidator() {
 	// Output:
 	// Environment: dev
 	// DebugMode: false
+}
+
+// ExampleLoader_WithTransformer demonstrates canonicalizing typed config before validation.
+func ExampleLoader_WithTransformer() {
+	type Config struct {
+		Environment string `conf:"required,oneof:dev,staging,prod"`
+	}
+
+	os.Setenv("EXTRANS_ENVIRONMENT", " PROD ")
+	defer os.Unsetenv("EXTRANS_ENVIRONMENT")
+
+	loader := rigging.NewLoader[Config]().
+		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXTRANS_"})).
+		WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+			cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
+			return nil
+		}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Environment: %s\n", cfg.Environment)
+
+	// Output:
+	// Environment: prod
 }
 
 // ExampleDumpEffective demonstrates dumping configuration with secret redaction.

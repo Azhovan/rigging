@@ -9,21 +9,36 @@ import (
 	"time"
 )
 
-// Loader loads and validates configuration from multiple sources.
-// Sources are processed in order (later override earlier). Supports tag-based and custom validation.
-// Thread-safe for reads, not for concurrent configuration changes.
-type Loader[T any] struct {
-	sources    []Source
-	validators []Validator[T]
-	strict     bool // Fail on unknown keys (default: true)
+// Transformer mutates a typed config after binding/defaults/conversion and before validation.
+// Use for canonicalization or deriving fields from already-typed values.
+type Transformer[T any] interface {
+	Transform(ctx context.Context, cfg *T) error
 }
 
-// NewLoader creates a Loader with no sources/validators and strict mode enabled.
+// TransformerFunc is a function adapter for Transformer interface.
+type TransformerFunc[T any] func(ctx context.Context, cfg *T) error
+
+func (f TransformerFunc[T]) Transform(ctx context.Context, cfg *T) error {
+	return f(ctx, cfg)
+}
+
+// Loader loads and validates configuration from multiple sources.
+// Sources are processed in order (later override earlier). Supports transformers, tag-based validation, and custom validation.
+// Thread-safe for reads, not for concurrent configuration changes.
+type Loader[T any] struct {
+	sources      []Source
+	transformers []Transformer[T]
+	validators   []Validator[T]
+	strict       bool // Fail on unknown keys (default: true)
+}
+
+// NewLoader creates a Loader with no sources, transformers, or validators and strict mode enabled.
 func NewLoader[T any]() *Loader[T] {
 	return &Loader[T]{
-		sources:    make([]Source, 0),
-		validators: make([]Validator[T], 0),
-		strict:     true, // Default to strict mode
+		sources:      make([]Source, 0),
+		transformers: make([]Transformer[T], 0),
+		validators:   make([]Validator[T], 0),
+		strict:       true, // Default to strict mode
 	}
 }
 
@@ -33,7 +48,13 @@ func (l *Loader[T]) WithSource(src Source) *Loader[T] {
 	return l
 }
 
-// WithValidator adds a custom validator (executed after tag-based validation).
+// WithTransformer adds a typed transform (executed after binding and before tag-based validation).
+func (l *Loader[T]) WithTransformer(t Transformer[T]) *Loader[T] {
+	l.transformers = append(l.transformers, t)
+	return l
+}
+
+// WithValidator adds a custom validator (executed after transformers and tag-based validation).
 func (l *Loader[T]) WithValidator(v Validator[T]) *Loader[T] {
 	l.validators = append(l.validators, v)
 	return l
@@ -139,14 +160,28 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 	presentFields := make(map[string]bool)
 	bindErrors := bindStructWithPresence(cfgValue, mergedData, &provenanceFields, presentFields, "", "")
 
-	// Step 5: Validate struct (tag-based validation)
+	allErrors := append([]FieldError{}, bindErrors...)
+
+	// Step 5: Run typed transforms after successful binding so transformers operate on converted values.
+	if len(bindErrors) == 0 {
+		for i, transformer := range l.transformers {
+			err := transformer.Transform(ctx, cfg)
+			if err != nil {
+				if valErr, ok := err.(*ValidationError); ok {
+					allErrors = append(allErrors, valErr.FieldErrors...)
+				} else {
+					return nil, nil, fmt.Errorf("transformer %d failed: %w", i, err)
+				}
+			}
+		}
+	}
+
+	// Step 6: Validate struct (tag-based validation)
 	// Required checks use presence data captured before conversion.
 	validationErrors := validateStructWithPresence(cfgValue, presentFields)
+	allErrors = append(allErrors, validationErrors...)
 
-	// Merge binding and validation errors
-	allErrors := append(bindErrors, validationErrors...)
-
-	// Step 6: Run custom validators
+	// Step 7: Run custom validators
 	for i, validator := range l.validators {
 		err := validator.Validate(ctx, cfg)
 		if err != nil {
@@ -160,18 +195,18 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		}
 	}
 
-	// Step 7: Return error if any validation failed
+	// Step 8: Return error if any validation failed
 	if len(allErrors) > 0 {
 		return nil, nil, &ValidationError{FieldErrors: allErrors}
 	}
 
-	// Step 8: Build provenance for the config instance
+	// Step 9: Build provenance for the config instance
 	prov := &Provenance{Fields: provenanceFields}
 	if store {
 		storeProvenance(cfg, prov)
 	}
 
-	// Step 9: Return the loaded configuration
+	// Step 10: Return the loaded configuration
 	return cfg, prov, nil
 }
 
