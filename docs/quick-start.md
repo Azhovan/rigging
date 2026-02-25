@@ -70,7 +70,8 @@ if ok {
 }
 ```
 
-### Redacted dump
+<a id="redacted-dump"></a>
+### Redacted Dump
 
 ```go
 rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
@@ -78,7 +79,8 @@ rigging.DumpEffective(os.Stdout, cfg, rigging.WithSources())
 
 Secrets tagged with `conf:"secret"` are redacted.
 
-### Snapshot for debugging and audits
+<a id="snapshots-debugging-audits"></a>
+### Snapshots for Debugging and Audits
 
 ```go
 snapshot, err := rigging.CreateSnapshot(cfg)
@@ -94,7 +96,8 @@ if err := rigging.WriteSnapshot(snapshot, "snapshots/config-{{timestamp}}.json")
 Snapshots include flattened config values, provenance, and secret redaction.
 Use `WithExcludeFields(...)` to omit noisy fields when sharing or storing snapshots.
 
-## 6. Key Mapping Rules (Important)
+<a id="key-mapping-rules"></a>
+## 6. Key Mapping Rules
 
 Rigging matches using normalized lowercase key paths.
 
@@ -127,7 +130,8 @@ If you need to bind a field to a specific environment-style key path, use `env:`
 
 Tag validation and custom validators run during `Load`.
 
-### Typed transforms (before tag validation)
+<a id="typed-transforms"></a>
+### Typed Transforms (Before Tag Validation)
 
 Use `WithTransformer(...)` when you need to normalize or derive typed values before tag validation runs.
 This is useful for canonicalization such as trimming whitespace or normalizing enum casing.
@@ -142,7 +146,8 @@ loader.WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context,
 Use typed transforms for post-bind value normalization.
 For source key aliasing/normalization (for example renaming keys before strict mode), use a custom source wrapper instead.
 
-### Optional fields (`Optional[T]`)
+<a id="optional-fields"></a>
+### Optional Fields (`Optional[T]`)
 
 Use `rigging.Optional[T]` when you need to distinguish "not set" from a zero value (`false`, `0`, `""`).
 
@@ -163,7 +168,8 @@ if rateLimit, ok := cfg.Features.RateLimit.Get(); ok {
 }
 ```
 
-### Custom validators (after tag validation)
+<a id="custom-validators"></a>
+### Custom Validators (After Tag Validation)
 
 ```go
 loader.WithValidator(rigging.ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {

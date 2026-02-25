@@ -123,6 +123,40 @@ func TestWithTransformer(t *testing.T) {
 	}
 }
 
+// TestWithTransformerFunc verifies that WithTransformerFunc wraps and adds a transformer and returns the loader for chaining.
+func TestWithTransformerFunc(t *testing.T) {
+	type Config struct {
+		Value string
+	}
+
+	loader := NewLoader[Config]()
+	called := false
+
+	result := loader.WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
+		called = true
+		cfg.Value = "normalized"
+		return nil
+	})
+	if result != loader {
+		t.Error("WithTransformerFunc should return the same loader instance for chaining")
+	}
+
+	if len(loader.transformers) != 1 {
+		t.Fatalf("expected 1 transformer, got %d", len(loader.transformers))
+	}
+
+	cfg := &Config{}
+	if err := loader.transformers[0].Transform(context.Background(), cfg); err != nil {
+		t.Fatalf("unexpected error calling wrapped transformer: %v", err)
+	}
+	if !called {
+		t.Fatal("expected wrapped transformer function to be called")
+	}
+	if cfg.Value != "normalized" {
+		t.Fatalf("expected transformer to mutate cfg.Value to %q, got %q", "normalized", cfg.Value)
+	}
+}
+
 // TestStrict verifies that Strict method sets the strict flag and returns the loader for chaining.
 func TestStrict(t *testing.T) {
 	loader := NewLoader[struct{}]()

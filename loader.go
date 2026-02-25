@@ -54,6 +54,12 @@ func (l *Loader[T]) WithTransformer(t Transformer[T]) *Loader[T] {
 	return l
 }
 
+// WithTransformerFunc adds a typed transform function (executed after binding and before tag-based validation).
+// This is a convenience wrapper around WithTransformer(TransformerFunc[T](fn)).
+func (l *Loader[T]) WithTransformerFunc(fn func(context.Context, *T) error) *Loader[T] {
+	return l.WithTransformer(TransformerFunc[T](fn))
+}
+
 // WithValidator adds a custom validator (executed after transformers and tag-based validation).
 func (l *Loader[T]) WithValidator(v Validator[T]) *Loader[T] {
 	l.validators = append(l.validators, v)

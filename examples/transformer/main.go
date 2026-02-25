@@ -25,12 +25,12 @@ func main() {
 
 	loader := rigging.NewLoader[AppConfig]().
 		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXTRANS_"})).
-		WithTransformer(rigging.TransformerFunc[AppConfig](func(ctx context.Context, cfg *AppConfig) error {
+		WithTransformerFunc(func(ctx context.Context, cfg *AppConfig) error {
 			// Typed transform: canonicalize values after binding/conversion, before validation.
 			cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
 			cfg.Region = strings.ToLower(strings.TrimSpace(cfg.Region))
 			return nil
-		}))
+		})
 
 	cfg, err := loader.Load(ctx)
 	if err != nil {

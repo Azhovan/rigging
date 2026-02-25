@@ -84,6 +84,7 @@ Behavior notes:
 - In strict mode, valid nested keys under dynamic map entries are accepted (for example, `clickhouse_map.primary.host`), but unknown nested fields are rejected (for example, `clickhouse_map.primary.unknown`).
 - With `Strict(false)`, unknown nested keys do not fail the load.
 
+<a id="key-normalization-by-source"></a>
 ## Key Normalization by Source
 
 | Source | Example input | Normalized key |
@@ -112,6 +113,7 @@ Typed transforms are a separate stage from source key normalization:
 
 See [API Reference](api-reference.md) (`Load Pipeline`, `Transformer[T]`) and [Configuration Patterns](patterns.md) for when to use typed transforms.
 
+<a id="key-mapping-precedence-required"></a>
 ## Key Mapping + Precedence + `required` Decision Table
 
 | Situation | Result | Validation outcome |
@@ -146,6 +148,7 @@ type SourceWithKeys interface {
 
 `originalKeys` lets Rigging report exact source keys in provenance (for example, full env var names).
 
+<a id="watch-reload"></a>
 ## Watch and Reload
 
 ```go
