@@ -567,6 +567,89 @@ func TestLoad_TransformerRunsBeforeTagValidation(t *testing.T) {
 	}
 }
 
+func TestLoad_TransformerReturnsValidationError(t *testing.T) {
+	type Config struct {
+		Name string
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"name": "alice",
+		},
+	}
+
+	loader := NewLoader[Config]().
+		WithSource(source).
+		WithTransformer(TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+			return &ValidationError{
+				FieldErrors: []FieldError{{
+					FieldPath: "Name",
+					Code:      "transformer_error",
+					Message:   "name rejected by transformer",
+				}},
+			}
+		}))
+
+	cfg, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("expected validation error from transformer")
+	}
+	if cfg != nil {
+		t.Error("cfg should be nil when transformer returns validation error")
+	}
+
+	valErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T", err)
+	}
+	if len(valErr.FieldErrors) != 1 {
+		t.Fatalf("expected 1 field error, got %d", len(valErr.FieldErrors))
+	}
+
+	fe := valErr.FieldErrors[0]
+	if fe.FieldPath != "Name" {
+		t.Errorf("expected FieldPath=Name, got %q", fe.FieldPath)
+	}
+	if fe.Code != "transformer_error" {
+		t.Errorf("expected Code=transformer_error, got %q", fe.Code)
+	}
+}
+
+func TestLoad_TransformerReturnsGenericError(t *testing.T) {
+	type Config struct {
+		Name string
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"name": "alice",
+		},
+	}
+
+	loader := NewLoader[Config]().
+		WithSource(source).
+		WithTransformer(TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+			return fmt.Errorf("transformer boom")
+		}))
+
+	cfg, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("expected error from transformer")
+	}
+	if cfg != nil {
+		t.Error("cfg should be nil when transformer returns generic error")
+	}
+	if _, ok := err.(*ValidationError); ok {
+		t.Fatalf("expected non-validation error, got *ValidationError: %v", err)
+	}
+	if !strings.Contains(err.Error(), "transformer 0 failed") {
+		t.Fatalf("expected wrapped transformer index in error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "transformer boom") {
+		t.Fatalf("expected original transformer error in message, got %q", err.Error())
+	}
+}
+
 // TestLoad_CustomValidator verifies that custom validators are executed.
 func TestLoad_CustomValidator(t *testing.T) {
 	type Config struct {

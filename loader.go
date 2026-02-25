@@ -23,7 +23,7 @@ func (f TransformerFunc[T]) Transform(ctx context.Context, cfg *T) error {
 }
 
 // Loader loads and validates configuration from multiple sources.
-// Sources are processed in order (later override earlier). Supports transforms, tag-based, and custom validation.
+// Sources are processed in order (later override earlier). Supports transformers, tag-based validation, and custom validation.
 // Thread-safe for reads, not for concurrent configuration changes.
 type Loader[T any] struct {
 	sources      []Source
@@ -32,7 +32,7 @@ type Loader[T any] struct {
 	strict       bool // Fail on unknown keys (default: true)
 }
 
-// NewLoader creates a Loader with no sources/validators and strict mode enabled.
+// NewLoader creates a Loader with no sources, transformers, or validators and strict mode enabled.
 func NewLoader[T any]() *Loader[T] {
 	return &Loader[T]{
 		sources:      make([]Source, 0),
@@ -54,7 +54,7 @@ func (l *Loader[T]) WithTransformer(t Transformer[T]) *Loader[T] {
 	return l
 }
 
-// WithValidator adds a custom validator (executed after tag-based validation and transforms).
+// WithValidator adds a custom validator (executed after transformers and tag-based validation).
 func (l *Loader[T]) WithValidator(v Validator[T]) *Loader[T] {
 	l.validators = append(l.validators, v)
 	return l
