@@ -111,10 +111,10 @@ For example, a transformer can normalize `" PROD "` to `"prod"` before a `oneof:
 ```go
 loader := rigging.NewLoader[Config]().
     WithSource(sourceenv.New(sourceenv.Options{Prefix: "APP_"})).
-    WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+    WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
         cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
         return nil
-    }))
+    })
 ```
 
 ## Comparison with Other Libraries
@@ -131,13 +131,49 @@ loader := rigging.NewLoader[Config]().
 
 \* Rigging provides the `Watch()` API for custom configuration sources. Built-in file and environment sources don't support watching yet.
 
+## Watch/Reload Capability Status
+
+| Capability | Status | Notes |
+|---|---|---|
+| `Loader.Watch()` API | Available | Reload pipeline and snapshots are supported |
+| Custom source watch (`Source.Watch`) | Available | Implement change events in your source |
+| Built-in `sourcefile` watch | Not supported yet | Returns `ErrWatchNotSupported` |
+| Built-in `sourceenv` watch | Not supported yet | Returns `ErrWatchNotSupported` |
+
+See [Configuration Sources: Watch and Reload](docs/configuration-sources.md#watch-reload) and the [FAQ](#faq) for current limitations and usage guidance.
+
 ## Installation
 
 ```bash
 go get github.com/Azhovan/rigging@latest
 ```
 
+## Common Paths
+
+- **New service setup**: [Quick Start](docs/quick-start.md) -> [Configuration Sources](docs/configuration-sources.md) -> [`examples/basic`](examples/basic)
+- **Validation-first startup policy**: [Quick Start: Fail-Fast Validation](docs/quick-start.md#7-fail-fast-validation) -> [API Reference: Validation Semantics](docs/api-reference.md#validation-semantics)
+- **Debugging config incidents**: [Quick Start: Provenance](docs/quick-start.md#provenance) -> [Quick Start: Snapshots](docs/quick-start.md#snapshots-debugging-audits) -> [Configuration Patterns](docs/patterns.md#7-use-provenance-during-incident-response)
+- **Migrating from Viper / envconfig**: [Comparison](#comparison-with-other-libraries) -> [Quick Start: Key Mapping Rules](docs/quick-start.md#key-mapping-rules) -> [Configuration Sources](docs/configuration-sources.md#key-normalization-by-source)
+- **Custom source + reload loop**: [Configuration Sources: Custom Sources](docs/configuration-sources.md#custom-sources) -> [Configuration Sources: Watch and Reload](docs/configuration-sources.md#watch-reload) -> [API Reference: Watch and Reload](docs/api-reference.md#watch-and-reload)
+
 ## Documentation
+
+### Choose a Starting Point
+
+| If you need to... | Start here | API / deep dive |
+|---|---|---|
+| Get from zero to a typed config loader quickly | [Quick Start](docs/quick-start.md) | [API Reference](docs/api-reference.md) |
+| Layer file + env config with explicit precedence | [Quick Start: Provide Inputs](docs/quick-start.md#3-provide-inputs) | [Configuration Sources](docs/configuration-sources.md) |
+| See where each value came from (provenance) | [Quick Start: Provenance](docs/quick-start.md#provenance) | [API Reference: `GetProvenance`](docs/api-reference.md#getprovenance) |
+| Print effective config safely (with secret redaction) | [Quick Start: Redacted Dump](docs/quick-start.md#redacted-dump) | [API Reference: `DumpEffective`](docs/api-reference.md#dumpeffective) |
+| Capture/share a redacted snapshot for debugging or audits | [Quick Start: Snapshots](docs/quick-start.md#snapshots-debugging-audits) | [API Reference: `CreateSnapshot`](docs/api-reference.md#createsnapshot) |
+| Understand env/file key mapping and naming rules | [Quick Start: Key Mapping Rules](docs/quick-start.md#key-mapping-rules) | [Configuration Sources: Key Normalization](docs/configuration-sources.md#key-normalization-by-source) |
+| Understand precedence + `required` outcomes for edge cases | [Configuration Sources: Decision Table](docs/configuration-sources.md#key-mapping-precedence-required) | [API Reference: Validation Semantics](docs/api-reference.md#validation-semantics) |
+| Normalize typed values before tag validation | [Quick Start: Typed Transforms](docs/quick-start.md#typed-transforms) | [API Reference: Load Pipeline](docs/api-reference.md#load-pipeline) |
+| Distinguish “not set” from zero values | [Quick Start: Optional Fields](docs/quick-start.md#optional-fields) | [API Reference: `Optional[T]`](docs/api-reference.md#optionalt) |
+| Add cross-field/business-rule checks | [Quick Start: Custom Validators](docs/quick-start.md#custom-validators) | [API Reference: `Validator[T]`](docs/api-reference.md#validatort) |
+| Reject unknown keys during startup | [API Reference: Strict Mode](docs/api-reference.md#strict-mode) | [Configuration Sources](docs/configuration-sources.md) |
+| Implement watch/reload with a custom source | [Configuration Sources: Watch and Reload](docs/configuration-sources.md#watch-reload) | [API Reference: Watch and Reload](docs/api-reference.md#watch-and-reload) |
 
 - **[Quick Start Guide](docs/quick-start.md)** - Get started with installation, basic usage, validation, and observability
 - **[Configuration Sources](docs/configuration-sources.md)** - Learn about environment variables, file sources, custom sources, and watch/reload

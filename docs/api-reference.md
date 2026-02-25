@@ -14,6 +14,7 @@ loader := rigging.NewLoader[Config]()
 
 - `WithSource(src Source) *Loader[T]` - Add a configuration source
 - `WithTransformer(t Transformer[T]) *Loader[T]` - Add a typed transform (after bind/defaults/conversion, before validation)
+- `WithTransformerFunc(fn func(context.Context, *T) error) *Loader[T]` - Add a typed transform using a function (ergonomic helper for inline transforms)
 - `WithValidator(v Validator[T]) *Loader[T]` - Add a custom validator
 - `Strict(strict bool) *Loader[T]` - Enable/disable strict mode
 - `Load(ctx context.Context) (*T, error)` - Load and validate configuration
@@ -83,6 +84,15 @@ type Transformer[T any] interface {
 
 **Helper:**
 - `TransformerFunc[T](func(ctx context.Context, cfg *T) error)` - Function adapter
+
+When registering an inline transform, prefer `WithTransformerFunc(...)` for a shorter call site:
+
+```go
+loader.WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
+    cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
+    return nil
+})
+```
 
 ### Validator[T]
 
