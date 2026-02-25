@@ -13,6 +13,7 @@ loader := rigging.NewLoader[Config]()
 **Methods:**
 
 - `WithSource(src Source) *Loader[T]` - Add a configuration source
+- `WithTransformer(t Transformer[T]) *Loader[T]` - Add a typed transform (after bind/defaults/conversion, before validation)
 - `WithValidator(v Validator[T]) *Loader[T]` - Add a custom validator
 - `Strict(strict bool) *Loader[T]` - Enable/disable strict mode
 - `Load(ctx context.Context) (*T, error)` - Load and validate configuration
@@ -67,6 +68,22 @@ type Optional[T any] struct {
 - `Get() (T, bool)` - Returns value and whether it was set
 - `OrDefault(defaultVal T) T` - Returns value or default
 
+### Transformer[T]
+
+Interface for typed config transforms.
+
+Transformers run after binding/defaults/type conversion and before tag-based validation.
+Use them for canonicalization (for example trim/lowercase/derive fields), not source key normalization.
+
+```go
+type Transformer[T any] interface {
+    Transform(ctx context.Context, cfg *T) error
+}
+```
+
+**Helper:**
+- `TransformerFunc[T](func(ctx context.Context, cfg *T) error)` - Function adapter
+
 ### Validator[T]
 
 Interface for custom validation.
@@ -79,6 +96,21 @@ type Validator[T any] interface {
 
 **Helper:**
 - `ValidatorFunc[T](func(ctx context.Context, cfg *T) error)` - Function adapter
+
+## Load Pipeline
+
+Rigging uses a fixed load pipeline during `Loader.Load` and `Loader.Watch` reloads:
+
+`merge sources -> strict unknown-key check -> bind/type conversion/defaults -> typed transforms -> tag validation -> custom validators`
+
+Behavior notes:
+
+- Sources are merged in registration order; later sources override earlier ones.
+- `Strict(true)` is the default, and unknown-key checks run before binding.
+- Binding applies defaults and type conversion before transformers run.
+- `WithTransformer(...)` mutates typed config values before tag validation.
+- `WithValidator(...)` runs after tag validation for cross-field/business checks.
+- Source/key normalization (for example env key rewriting/aliasing) belongs in sources or source wrappers, not typed transformers.
 
 ## Validation Semantics
 

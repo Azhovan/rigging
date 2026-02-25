@@ -24,6 +24,9 @@ func TestNewLoader(t *testing.T) {
 	if loader.validators == nil {
 		t.Error("validators slice should be initialized")
 	}
+	if loader.transformers == nil {
+		t.Error("transformers slice should be initialized")
+	}
 
 	if !loader.strict {
 		t.Error("strict mode should be enabled by default")
@@ -35,6 +38,9 @@ func TestNewLoader(t *testing.T) {
 
 	if len(loader.validators) != 0 {
 		t.Errorf("expected 0 validators, got %d", len(loader.validators))
+	}
+	if len(loader.transformers) != 0 {
+		t.Errorf("expected 0 transformers, got %d", len(loader.transformers))
 	}
 }
 
@@ -93,6 +99,27 @@ func TestWithValidator(t *testing.T) {
 	loader.WithValidator(validator2)
 	if len(loader.validators) != 2 {
 		t.Fatalf("expected 2 validators, got %d", len(loader.validators))
+	}
+}
+
+// TestWithTransformer verifies that WithTransformer adds transformers and returns the loader for chaining.
+func TestWithTransformer(t *testing.T) {
+	loader := NewLoader[struct{}]()
+	transformer1 := TransformerFunc[struct{}](func(ctx context.Context, cfg *struct{}) error { return nil })
+	transformer2 := TransformerFunc[struct{}](func(ctx context.Context, cfg *struct{}) error { return nil })
+
+	result := loader.WithTransformer(transformer1)
+	if result != loader {
+		t.Error("WithTransformer should return the same loader instance for chaining")
+	}
+
+	if len(loader.transformers) != 1 {
+		t.Fatalf("expected 1 transformer, got %d", len(loader.transformers))
+	}
+
+	loader.WithTransformer(transformer2)
+	if len(loader.transformers) != 2 {
+		t.Fatalf("expected 2 transformers, got %d", len(loader.transformers))
 	}
 }
 
@@ -500,6 +527,44 @@ func TestLoad_PresentZeroValuesValidateConstraintsWithoutRequired(t *testing.T) 
 			t.Fatal("expected non-nil config")
 		}
 	})
+}
+
+func TestLoad_TransformerRunsBeforeTagValidation(t *testing.T) {
+	type Config struct {
+		Environment string `conf:"required,oneof:prod,staging"`
+	}
+
+	source := &mockSource{
+		data: map[string]any{
+			"environment": " PROD ",
+		},
+	}
+
+	var validatorSaw string
+	loader := NewLoader[Config]().
+		WithSource(source).
+		WithTransformer(TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+			cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
+			return nil
+		})).
+		WithValidator(ValidatorFunc[Config](func(ctx context.Context, cfg *Config) error {
+			validatorSaw = cfg.Environment
+			return nil
+		}))
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.Environment != "prod" {
+		t.Fatalf("expected transformed environment=prod, got %q", cfg.Environment)
+	}
+	if validatorSaw != "prod" {
+		t.Fatalf("expected validator to see transformed value, got %q", validatorSaw)
+	}
 }
 
 // TestLoad_CustomValidator verifies that custom validators are executed.

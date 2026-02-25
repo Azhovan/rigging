@@ -5,11 +5,13 @@ Use this page to quickly find the right example format.
 ## Runnable Examples
 
 - [basic](basic/) - End-to-end app config loading with file + env layering, validation, provenance, and redaction.
+- [transformer](transformer/) - Typed `WithTransformer(...)` canonicalization before tag validation.
 
 Run it from the repository root:
 
 ```bash
 go run ./examples/basic
+go run ./examples/transformer
 ```
 
 ## GoDoc Examples (API-Focused)
