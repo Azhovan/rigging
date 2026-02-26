@@ -67,10 +67,10 @@ This keeps normalization logic out of request paths and lets tag validation oper
 
 ```go
 loader := rigging.NewLoader[Config]().
-    WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+    WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
         cfg.Env = strings.ToLower(strings.TrimSpace(cfg.Env))
         return nil
-    }))
+    })
 ```
 
 Typical uses:
@@ -79,6 +79,8 @@ Typical uses:
 - dedupe/sort lists before custom validation or downstream use
 
 Important:
+- `WithTransformerFunc(...)` is the ergonomic helper for inline transform functions.
+- `WithTransformer(...)` registers a reusable `Transformer[T]` implementation.
 - `WithTransformer(...)` is for typed value normalization after binding/defaults/conversion.
 - source key aliasing or key normalization belongs in sources/source wrappers, not typed transforms.
 

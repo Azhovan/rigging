@@ -135,12 +135,13 @@ Tag validation and custom validators run during `Load`.
 
 Use `WithTransformer(...)` when you need to normalize or derive typed values before tag validation runs.
 This is useful for canonicalization such as trimming whitespace or normalizing enum casing.
+Use `WithTransformerFunc(...)` for inline functions (as shown below), and `WithTransformer(...)` when registering a reusable `Transformer[T]` implementation.
 
 ```go
-loader.WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+loader.WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
     cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
     return nil
-}))
+})
 ```
 
 Use typed transforms for post-bind value normalization.
