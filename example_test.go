@@ -136,10 +136,10 @@ func ExampleLoader_WithTransformer() {
 
 	loader := rigging.NewLoader[Config]().
 		WithSource(sourceenv.New(sourceenv.Options{Prefix: "EXTRANS_"})).
-		WithTransformer(rigging.TransformerFunc[Config](func(ctx context.Context, cfg *Config) error {
+		WithTransformerFunc(func(ctx context.Context, cfg *Config) error {
 			cfg.Environment = strings.ToLower(strings.TrimSpace(cfg.Environment))
 			return nil
-		}))
+		})
 
 	cfg, err := loader.Load(context.Background())
 	if err != nil {
