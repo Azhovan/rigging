@@ -22,7 +22,7 @@ type Options struct {
 	// Required: if true, missing files cause an error. Default: false (returns empty map).
 	Required bool
 
-	// Root selects a dot-separated map path inside the parsed file (for example, "hub.msa").
+	// Root selects a dot-separated map path inside the parsed file (for example, "root.section").
 	// When set, only that subtree is flattened and exposed as the source root.
 	Root string
 }

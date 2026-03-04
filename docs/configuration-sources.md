@@ -35,13 +35,13 @@ Prefix behavior:
 ```go
 source := sourcefile.New("config.yaml", sourcefile.Options{
     Required: true,
-    Root:     "hub.msa",
+    Root:     "root.section",
 })
 ```
 
 - Supports YAML/JSON/TOML (extension auto-detected unless `Format` is set)
 - Nested objects are flattened to dot paths (`database.host`)
-- `Root` loads from a dot-separated subtree (for example, `hub.msa`) and flattens keys relative to that subtree
+- `Root` loads from a dot-separated subtree (for example, `root.section`) and flattens keys relative to that subtree
 - Missing file returns empty map unless `Required: true`
 - `Root` errors are typed: `sourcefile.ErrRootNotFound` (missing path), `sourcefile.ErrRootNotMap` (non-map path), `sourcefile.ErrInvalidRoot` (invalid syntax such as leading/trailing dot, empty segment, wildcard)
 
