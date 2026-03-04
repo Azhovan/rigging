@@ -3,6 +3,7 @@ package sourcefile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,20 @@ type Options struct {
 
 	// Required: if true, missing files cause an error. Default: false (returns empty map).
 	Required bool
+
+	// Root selects a dot-separated map path inside the parsed file (for example, "hub.msa").
+	// When set, only that subtree is flattened and exposed as the source root.
+	Root string
 }
+
+var (
+	// ErrRootNotFound is returned when Options.Root does not exist in the parsed file.
+	ErrRootNotFound = errors.New("sourcefile: root not found")
+	// ErrRootNotMap is returned when Options.Root resolves to a non-map value.
+	ErrRootNotMap = errors.New("sourcefile: root is not a map")
+	// ErrInvalidRoot is returned when Options.Root has invalid dot-path syntax.
+	ErrInvalidRoot = errors.New("sourcefile: invalid root path")
+)
 
 type fileSource struct {
 	path string
@@ -62,27 +76,90 @@ func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[stri
 	var raw map[string]any
 	switch format {
 	case "yaml", "yml":
-		if err := yaml.Unmarshal(data, &raw); err != nil {
-			return nil, nil, fmt.Errorf("parse YAML file %s: %w", f.path, err)
+		if parseErr := yaml.Unmarshal(data, &raw); parseErr != nil {
+			return nil, nil, fmt.Errorf("parse YAML file %s: %w", f.path, parseErr)
 		}
 	case "json":
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return nil, nil, fmt.Errorf("parse JSON file %s: %w", f.path, err)
+		if parseErr := json.Unmarshal(data, &raw); parseErr != nil {
+			return nil, nil, fmt.Errorf("parse JSON file %s: %w", f.path, parseErr)
 		}
 	case "toml":
-		if err := toml.Unmarshal(data, &raw); err != nil {
-			return nil, nil, fmt.Errorf("parse TOML file %s: %w", f.path, err)
+		if parseErr := toml.Unmarshal(data, &raw); parseErr != nil {
+			return nil, nil, fmt.Errorf("parse TOML file %s: %w", f.path, parseErr)
 		}
 	default:
 		return nil, nil, fmt.Errorf("unsupported file format: %s (supported: yaml, json, toml)", format)
 	}
 
+	rootValue := any(raw)
+	if f.opts.Root != "" {
+		rootValue, err = resolveRoot(raw, f.opts.Root, f.path)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Flatten nested structures to dot-separated keys
 	flattened := make(map[string]any)
 	originalKeys := make(map[string]string)
-	flattenMapWithKeys("", raw, flattened, originalKeys)
+	flattenMapWithKeys("", rootValue, flattened, originalKeys)
 
 	return flattened, originalKeys, nil
+}
+
+func resolveRoot(raw map[string]any, root string, path string) (any, error) {
+	if err := validateRoot(root); err != nil {
+		return nil, err
+	}
+
+	current := any(raw)
+	segments := strings.Split(root, ".")
+	for i, segment := range segments {
+		next, ok := lookupRootSegment(current, segment)
+		if !ok {
+			return nil, fmt.Errorf("%w: root %q not found in %s", ErrRootNotFound, root, path)
+		}
+		current = next
+
+		if i < len(segments)-1 && !isRootMap(current) {
+			return nil, fmt.Errorf("%w: root %q traverses non-map path %q in %s", ErrRootNotMap, root, strings.Join(segments[:i+1], "."), path)
+		}
+	}
+
+	if !isRootMap(current) {
+		return nil, fmt.Errorf("%w: root %q is not a map in %s", ErrRootNotMap, root, path)
+	}
+
+	return current, nil
+}
+
+func validateRoot(root string) error {
+	if strings.HasPrefix(root, ".") || strings.HasSuffix(root, ".") || strings.Contains(root, "..") || strings.Contains(root, "*") {
+		return fmt.Errorf("%w: %q", ErrInvalidRoot, root)
+	}
+	return nil
+}
+
+func lookupRootSegment(value any, segment string) (any, bool) {
+	switch node := value.(type) {
+	case map[string]any:
+		v, ok := node[segment]
+		return v, ok
+	case map[any]any:
+		v, ok := node[segment]
+		return v, ok
+	default:
+		return nil, false
+	}
+}
+
+func isRootMap(value any) bool {
+	switch value.(type) {
+	case map[string]any, map[any]any:
+		return true
+	default:
+		return false
+	}
 }
 
 // flattenMapWithKeys recursively flattens nested maps to dot-separated keys and tracks original keys.
