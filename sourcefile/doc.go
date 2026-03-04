@@ -6,4 +6,11 @@
 //
 //	source := sourcefile.New("config.yaml", sourcefile.Options{Required: true})
 //	loader := rigging.NewLoader[Config]().WithSource(source)
+//
+// Subtree example:
+//
+//	source := sourcefile.New("config.yaml", sourcefile.Options{
+//		Root: "root.section",
+//	})
+//	loader := rigging.NewLoader[Config]().WithSource(source)
 package sourcefile
