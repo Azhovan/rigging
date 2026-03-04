@@ -39,6 +39,31 @@ type Source interface {
 - `sourcefile.New(path string, opts sourcefile.Options)` - YAML/JSON/TOML files
 - `sourceenv.New(opts sourceenv.Options)` - Environment variables
 
+`sourcefile.Options` fields:
+- `Format string` - Optional explicit format (`yaml`, `json`, `toml`). When empty, inferred from file extension.
+- `Required bool` - When true, missing files return an error. When false, missing files return an empty map.
+- `Root string` - Optional dot-separated subtree path to load and flatten as the source root.
+
+`sourcefile.Root` example:
+
+```go
+src := sourcefile.New("config.yaml", sourcefile.Options{
+    Root: "root.section",
+})
+
+loader := rigging.NewLoader[Config]().WithSource(src)
+cfg, err := loader.Load(ctx)
+if err != nil {
+    if errors.Is(err, sourcefile.ErrRootNotFound) ||
+        errors.Is(err, sourcefile.ErrRootNotMap) ||
+        errors.Is(err, sourcefile.ErrInvalidRoot) {
+        // handle root configuration problems
+    }
+    return err
+}
+_ = cfg
+```
+
 `Name()` is used in provenance output (for example, `file:config.yaml`, `env:APP_PORT`).
 
 ### SourceWithKeys

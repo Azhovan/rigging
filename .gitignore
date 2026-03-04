@@ -1,2 +1,34 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+*.prof
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories (uncomment if vendoring)
+# vendor/
+
+# IDE and editor files
 .idea/
-/coverage.out
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# AI file and directories
+AGENTS.md
+.codex/
+.kiro/
+.tasks/

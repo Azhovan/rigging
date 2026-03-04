@@ -2,6 +2,7 @@ package sourcefile
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -179,11 +180,81 @@ func TestFileSource_ExplicitFormat(t *testing.T) {
 	assert.Equal(t, "value", data["key"])
 }
 
+func TestFileSource_Load_Root(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "config.yaml")
+	yamlContent := `
+root:
+  section:
+    enabled: true
+    pollInterval: 5s
+  sibling:
+    enabled: false
+`
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	require.NoError(t, err)
+
+	src := New(yamlFile, Options{Root: "root.section"})
+	srcWithKeys, ok := src.(rigging.SourceWithKeys)
+	require.True(t, ok, "source does not implement rigging.SourceWithKeys")
+
+	data, originalKeys, err := srcWithKeys.LoadWithKeys(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, true, data["enabled"])
+	assert.Equal(t, "5s", data["pollInterval"])
+	assert.NotContains(t, data, "root.section.enabled")
+	assert.NotContains(t, data, "sibling.enabled")
+	assert.Equal(t, "enabled", originalKeys["enabled"])
+}
+
+func TestFileSource_Load_RootErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "config.yaml")
+	yamlContent := `
+root:
+  section:
+    enabled: true
+`
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		root    string
+		wantErr error
+	}{
+		{name: "root not found", root: "root.missing", wantErr: ErrRootNotFound},
+		{name: "root is scalar", root: "root.section.enabled", wantErr: ErrRootNotMap},
+		{name: "invalid root leading dot", root: ".root.section", wantErr: ErrInvalidRoot},
+		{name: "invalid root empty segment", root: "root..section", wantErr: ErrInvalidRoot},
+		{name: "invalid root wildcard", root: "root.*", wantErr: ErrInvalidRoot},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := New(yamlFile, Options{Root: tt.root})
+			data, err := src.Load(context.Background())
+			require.Error(t, err)
+			assert.Nil(t, data)
+			assert.True(t, errors.Is(err, tt.wantErr))
+			assert.Contains(t, err.Error(), tt.root)
+		})
+	}
+}
+
 func TestFileSource_MissingFile_NotRequired(t *testing.T) {
 	// Try to load a non-existent file with Required=false
 	src := New("/nonexistent/config.yaml", Options{Required: false})
 	ctx := context.Background()
 	data, err := src.Load(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, data, "should return empty map for missing non-required file")
+}
+
+func TestFileSource_MissingFile_NotRequired_WithRoot(t *testing.T) {
+	src := New("/nonexistent/config.yaml", Options{Required: false, Root: "root.section"})
+	data, err := src.Load(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, data, "should return empty map for missing non-required file")
 }

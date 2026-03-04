@@ -35,12 +35,47 @@ Prefix behavior:
 ```go
 source := sourcefile.New("config.yaml", sourcefile.Options{
     Required: true,
+    Root:     "root.section",
 })
 ```
 
 - Supports YAML/JSON/TOML (extension auto-detected unless `Format` is set)
 - Nested objects are flattened to dot paths (`database.host`)
+- `Root` loads from a dot-separated subtree (for example, `root.section`) and flattens keys relative to that subtree
 - Missing file returns empty map unless `Required: true`
+- `Root` errors are typed: `sourcefile.ErrRootNotFound` (missing path), `sourcefile.ErrRootNotMap` (non-map path), `sourcefile.ErrInvalidRoot` (invalid syntax such as leading/trailing dot, empty segment, wildcard)
+
+### Load a Subtree with `Root`
+
+Use `Root` when one file contains multiple sections but this loader should bind only one section.
+
+Example file:
+
+```yaml
+root:
+  section:
+    enabled: true
+    pollInterval: 5s
+  sibling:
+    enabled: false
+```
+
+Example source setup:
+
+```go
+source := sourcefile.New("config.yaml", sourcefile.Options{
+    Root: "root.section",
+})
+```
+
+With this setup, file keys are flattened relative to `root.section`:
+- `root.section.enabled` -> `enabled`
+- `root.section.pollInterval` -> `pollInterval`
+
+Notes:
+- `Root` uses dot-separated path segments only.
+- `Required` behavior is unchanged; if the file is missing and `Required` is false, load returns an empty map.
+- `Root` is applied inside `sourcefile` before flattening; source ordering/precedence across providers is unchanged.
 
 ### Nested Collections from File Sources
 
