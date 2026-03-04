@@ -103,6 +103,11 @@ func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[stri
 	flattened := make(map[string]any)
 	originalKeys := make(map[string]string)
 	flattenMapWithKeys("", rootValue, flattened, originalKeys)
+	if f.opts.Root != "" {
+		for key, original := range originalKeys {
+			originalKeys[key] = f.opts.Root + "." + original
+		}
+	}
 
 	return flattened, originalKeys, nil
 }

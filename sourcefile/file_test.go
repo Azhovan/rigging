@@ -205,7 +205,8 @@ root:
 	assert.Equal(t, "5s", data["pollInterval"])
 	assert.NotContains(t, data, "root.section.enabled")
 	assert.NotContains(t, data, "sibling.enabled")
-	assert.Equal(t, "enabled", originalKeys["enabled"])
+	assert.Equal(t, "root.section.enabled", originalKeys["enabled"])
+	assert.Equal(t, "root.section.pollInterval", originalKeys["pollInterval"])
 }
 
 func TestFileSource_Load_RootErrors(t *testing.T) {
