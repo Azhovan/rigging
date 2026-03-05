@@ -270,6 +270,36 @@ root:
 	}
 }
 
+func TestFileSource_Load_Root_KeyAdaptationCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "config.yaml")
+	yamlContent := `
+root:
+  section:
+    apiKey: first
+    api_key: second
+`
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	require.NoError(t, err)
+
+	src := New(yamlFile, Options{
+		Root:          "root.section",
+		SnakeCaseKeys: true,
+	})
+	srcWithKeys, ok := src.(rigging.SourceWithKeys)
+	require.True(t, ok, "source does not implement rigging.SourceWithKeys")
+
+	data, originalKeys, err := srcWithKeys.LoadWithKeys(context.Background())
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.Nil(t, originalKeys)
+	assert.Contains(t, err.Error(), "sourcefile: adapted key collision in")
+	assert.Contains(t, err.Error(), `"api_key"`)
+	assert.Contains(t, err.Error(), yamlFile)
+	assert.Contains(t, err.Error(), "root.section.apiKey")
+	assert.Contains(t, err.Error(), "root.section.api_key")
+}
+
 func TestFileSource_Load_RootErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 	yamlFile := filepath.Join(tmpDir, "config.yaml")
