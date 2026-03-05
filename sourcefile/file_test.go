@@ -188,6 +188,8 @@ root:
   section:
     enabled: true
     pollInterval: 5s
+    nestedConfig:
+      retryCount: 3
   sibling:
     enabled: false
 `
@@ -203,10 +205,69 @@ root:
 
 	assert.Equal(t, true, data["enabled"])
 	assert.Equal(t, "5s", data["pollInterval"])
+	assert.Equal(t, 3, data["nestedConfig.retryCount"])
 	assert.NotContains(t, data, "root.section.enabled")
 	assert.NotContains(t, data, "sibling.enabled")
 	assert.Equal(t, "root.section.enabled", originalKeys["enabled"])
 	assert.Equal(t, "root.section.pollInterval", originalKeys["pollInterval"])
+	assert.Equal(t, "root.section.nestedConfig.retryCount", originalKeys["nestedConfig.retryCount"])
+}
+
+func TestFileSource_Load_Root_KeyAdaptation(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "config.yaml")
+	yamlContent := `
+root:
+  section:
+    pollInterval: 5s
+    nestedConfig:
+      retryCount: 3
+`
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		opts           Options
+		pollKey        string
+		nestedRetryKey string
+	}{
+		{
+			name: "snake_case only",
+			opts: Options{
+				Root:          "root.section",
+				SnakeCaseKeys: true,
+			},
+			pollKey:        "poll_interval",
+			nestedRetryKey: "nested_config_retry_count",
+		},
+		{
+			name: "snake_case with prefix",
+			opts: Options{
+				Root:          "root.section",
+				SnakeCaseKeys: true,
+				KeyPrefix:     "msa_",
+			},
+			pollKey:        "msa_poll_interval",
+			nestedRetryKey: "msa_nested_config_retry_count",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := New(yamlFile, tt.opts)
+			srcWithKeys, ok := src.(rigging.SourceWithKeys)
+			require.True(t, ok, "source does not implement rigging.SourceWithKeys")
+
+			data, originalKeys, err := srcWithKeys.LoadWithKeys(context.Background())
+			require.NoError(t, err)
+
+			assert.Equal(t, "5s", data[tt.pollKey])
+			assert.Equal(t, 3, data[tt.nestedRetryKey])
+			assert.Equal(t, "root.section.pollInterval", originalKeys[tt.pollKey])
+			assert.Equal(t, "root.section.nestedConfig.retryCount", originalKeys[tt.nestedRetryKey])
+		})
+	}
 }
 
 func TestFileSource_Load_RootErrors(t *testing.T) {
@@ -234,12 +295,18 @@ root:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			src := New(yamlFile, Options{Root: tt.root})
-			data, err := src.Load(context.Background())
-			require.Error(t, err)
-			assert.Nil(t, data)
-			assert.True(t, errors.Is(err, tt.wantErr))
-			assert.Contains(t, err.Error(), tt.root)
+			modes := []Options{
+				{Root: tt.root},
+				{Root: tt.root, SnakeCaseKeys: true, KeyPrefix: "msa_"},
+			}
+			for _, opts := range modes {
+				src := New(yamlFile, opts)
+				data, err := src.Load(context.Background())
+				require.Error(t, err)
+				assert.Nil(t, data)
+				assert.True(t, errors.Is(err, tt.wantErr))
+				assert.Contains(t, err.Error(), tt.root)
+			}
 		})
 	}
 }
