@@ -136,11 +136,24 @@ func adaptFlattenedKeys(flattened map[string]any, originalKeys map[string]string
 
 	for key, value := range flattened {
 		adaptedKey := adaptKeyShape(key, opts)
-		if _, exists := adapted[adaptedKey]; exists {
-			return nil, nil, fmt.Errorf("sourcefile: adapted key collision for %q", adaptedKey)
+		currentOriginal := originalKeys[key]
+		if currentOriginal == "" {
+			currentOriginal = key
+		}
+
+		if existingOriginal, exists := adaptedOriginalKeys[adaptedKey]; exists {
+			if existingOriginal == "" {
+				existingOriginal = adaptedKey
+			}
+			return nil, nil, fmt.Errorf(
+				"sourcefile: adapted key collision for %q (from %q and %q)",
+				adaptedKey,
+				existingOriginal,
+				currentOriginal,
+			)
 		}
 		adapted[adaptedKey] = value
-		adaptedOriginalKeys[adaptedKey] = originalKeys[key]
+		adaptedOriginalKeys[adaptedKey] = currentOriginal
 	}
 
 	return adapted, adaptedOriginalKeys, nil
