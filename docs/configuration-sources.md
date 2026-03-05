@@ -42,6 +42,8 @@ source := sourcefile.New("config.yaml", sourcefile.Options{
 - Supports YAML/JSON/TOML (extension auto-detected unless `Format` is set)
 - Nested objects are flattened to dot paths (`database.host`)
 - `Root` loads from a dot-separated subtree (for example, `root.section`) and flattens keys relative to that subtree
+- `SnakeCaseKeys` (opt-in) rewrites flattened keys to underscore snake_case (for example, `pollInterval` -> `poll_interval`, `http.clientTimeout` -> `http_client_timeout`)
+- `KeyPrefix` (optional) prepends a prefix to each flattened key after optional `SnakeCaseKeys` conversion (for example, `msa_`)
 - Missing file returns empty map unless `Required: true`
 - `Root` errors are typed: `sourcefile.ErrRootNotFound` (missing path), `sourcefile.ErrRootNotMap` (non-map path), `sourcefile.ErrInvalidRoot` (invalid syntax such as leading/trailing dot, empty segment, wildcard)
 
@@ -72,10 +74,23 @@ With this setup, file keys are flattened relative to `root.section`:
 - `root.section.enabled` -> `enabled`
 - `root.section.pollInterval` -> `pollInterval`
 
+### Optional Subtree Key Adaptation (Opt-In)
+
+```go
+source := sourcefile.New("config.yaml", sourcefile.Options{
+    Root:          "root.section",
+    SnakeCaseKeys: true,
+    KeyPrefix:     "msa_",
+})
+```
+
+With `SnakeCaseKeys: true` and `KeyPrefix: "msa_"`:
+- `root.section.pollInterval` -> `msa_poll_interval`
+
 Notes:
 - `Root` uses dot-separated path segments only.
 - `Required` behavior is unchanged; if the file is missing and `Required` is false, load returns an empty map.
-- `Root` is applied inside `sourcefile` before flattening; source ordering/precedence across providers is unchanged.
+- `Root` is applied inside `sourcefile` before flattening, and key adaptation is disabled by default.
 
 ### Nested Collections from File Sources
 
@@ -133,6 +148,7 @@ Behavior notes:
 Important:
 - Env source strips the configured prefix first, then preserves single underscores and converts `__` to `.`.
 - File source flattens nested objects but does not rewrite separators.
+- File source can optionally adapt flattened keys via `SnakeCaseKeys` and `KeyPrefix` in `sourcefile.Options`.
 - Rigging lowercases keys during loader merge for consistent matching across sources.
 - If your file keys are snake_case, use `name:` tags to match them.
 

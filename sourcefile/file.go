@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Azhovan/rigging"
+	"github.com/Azhovan/rigging/internal/normalize"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -25,6 +26,15 @@ type Options struct {
 	// Root selects a dot-separated map path inside the parsed file (for example, "root.section").
 	// When set, only that subtree is flattened and exposed as the source root.
 	Root string
+
+	// SnakeCaseKeys converts flattened keys to underscore-separated snake_case.
+	// Examples: "pollInterval" -> "poll_interval", "http.clientTimeout" -> "http_client_timeout".
+	// Disabled by default.
+	SnakeCaseKeys bool
+
+	// KeyPrefix prepends a prefix to each flattened key after optional SnakeCaseKeys conversion.
+	// Example: prefix "msa_" + "poll_interval" -> "msa_poll_interval".
+	KeyPrefix string
 }
 
 var (
@@ -108,8 +118,47 @@ func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[stri
 			originalKeys[key] = f.opts.Root + "." + original
 		}
 	}
+	if f.opts.SnakeCaseKeys || f.opts.KeyPrefix != "" {
+		adapted, adaptedOriginal, adaptErr := adaptFlattenedKeys(flattened, originalKeys, f.opts)
+		if adaptErr != nil {
+			return nil, nil, adaptErr
+		}
+		flattened = adapted
+		originalKeys = adaptedOriginal
+	}
 
 	return flattened, originalKeys, nil
+}
+
+func adaptFlattenedKeys(flattened map[string]any, originalKeys map[string]string, opts Options) (map[string]any, map[string]string, error) {
+	adapted := make(map[string]any, len(flattened))
+	adaptedOriginalKeys := make(map[string]string, len(originalKeys))
+
+	for key, value := range flattened {
+		adaptedKey := adaptKeyShape(key, opts)
+		if _, exists := adapted[adaptedKey]; exists {
+			return nil, nil, fmt.Errorf("sourcefile: adapted key collision for %q", adaptedKey)
+		}
+		adapted[adaptedKey] = value
+		adaptedOriginalKeys[adaptedKey] = originalKeys[key]
+	}
+
+	return adapted, adaptedOriginalKeys, nil
+}
+
+func adaptKeyShape(key string, opts Options) string {
+	adaptedKey := key
+	if opts.SnakeCaseKeys {
+		segments := strings.Split(adaptedKey, ".")
+		for i, segment := range segments {
+			segments[i] = normalize.DeriveFieldPath(segment)
+		}
+		adaptedKey = strings.Join(segments, "_")
+	}
+	if opts.KeyPrefix != "" {
+		adaptedKey = opts.KeyPrefix + adaptedKey
+	}
+	return adaptedKey
 }
 
 func resolveRoot(raw map[string]any, root string, path string) (any, error) {

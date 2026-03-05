@@ -43,6 +43,8 @@ type Source interface {
 - `Format string` - Optional explicit format (`yaml`, `json`, `toml`). When empty, inferred from file extension.
 - `Required bool` - When true, missing files return an error. When false, missing files return an empty map.
 - `Root string` - Optional dot-separated subtree path to load and flatten as the source root.
+- `SnakeCaseKeys bool` - Optional key-shape adaptation. When true, flattened keys are rewritten to underscore snake_case (`pollInterval` -> `poll_interval`, `http.clientTimeout` -> `http_client_timeout`).
+- `KeyPrefix string` - Optional prefix added to each flattened key after optional `SnakeCaseKeys` conversion (`msa_` + `poll_interval` -> `msa_poll_interval`).
 
 `sourcefile.Root` example:
 
@@ -63,6 +65,8 @@ if err != nil {
 }
 _ = cfg
 ```
+
+When `SnakeCaseKeys` is enabled, `root.section.pollInterval` becomes `poll_interval`; with `KeyPrefix: "msa_"`, it becomes `msa_poll_interval`.
 
 `Name()` is used in provenance output (for example, `file:config.yaml`, `env:APP_PORT`).
 
