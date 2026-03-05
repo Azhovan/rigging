@@ -293,7 +293,9 @@ root:
 	require.Error(t, err)
 	assert.Nil(t, data)
 	assert.Nil(t, originalKeys)
-	assert.Contains(t, err.Error(), `sourcefile: adapted key collision for "api_key"`)
+	assert.Contains(t, err.Error(), "sourcefile: adapted key collision in")
+	assert.Contains(t, err.Error(), `"api_key"`)
+	assert.Contains(t, err.Error(), yamlFile)
 	assert.Contains(t, err.Error(), "root.section.apiKey")
 	assert.Contains(t, err.Error(), "root.section.api_key")
 }

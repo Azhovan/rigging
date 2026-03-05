@@ -119,7 +119,7 @@ func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[stri
 		}
 	}
 	if f.opts.SnakeCaseKeys || f.opts.KeyPrefix != "" {
-		adapted, adaptedOriginal, adaptErr := adaptFlattenedKeys(flattened, originalKeys, f.opts)
+		adapted, adaptedOriginal, adaptErr := adaptFlattenedKeys(flattened, originalKeys, f.opts, f.path)
 		if adaptErr != nil {
 			return nil, nil, adaptErr
 		}
@@ -130,7 +130,7 @@ func (f *fileSource) LoadWithKeys(ctx context.Context) (map[string]any, map[stri
 	return flattened, originalKeys, nil
 }
 
-func adaptFlattenedKeys(flattened map[string]any, originalKeys map[string]string, opts Options) (map[string]any, map[string]string, error) {
+func adaptFlattenedKeys(flattened map[string]any, originalKeys map[string]string, opts Options, sourcePath string) (map[string]any, map[string]string, error) {
 	adapted := make(map[string]any, len(flattened))
 	adaptedOriginalKeys := make(map[string]string, len(originalKeys))
 
@@ -146,7 +146,8 @@ func adaptFlattenedKeys(flattened map[string]any, originalKeys map[string]string
 				existingOriginal = adaptedKey
 			}
 			return nil, nil, fmt.Errorf(
-				"sourcefile: adapted key collision for %q (from %q and %q)",
+				"sourcefile: adapted key collision in %q for %q (from %q and %q)",
+				sourcePath,
 				adaptedKey,
 				existingOriginal,
 				currentOriginal,
