@@ -39,11 +39,12 @@ type Config struct {
 }
 ```
 
-If your source keys use snake_case or custom paths, map explicitly:
+Derived keys already use snake_case.
+Use `name:` when a source key path differs from the derived path:
 
 ```go
 type Config struct {
-    MaxConnections int `conf:"name:max_connections"`
+    MaxConnections int    // matches max_connections
     APIKey         string `conf:"name:api.key"`
 }
 ```
@@ -53,11 +54,12 @@ This is useful during migrations or when a legacy env variable name must be pres
 
 ```go
 type Config struct {
-    DatabaseHost string `conf:"env:APP__DATABASE__HOST,required"`
+    DatabaseHost string `conf:"env:DATABASE__HOST,required"`
 }
 ```
 
 `env:` normalizes env-style syntax (`__` -> `.`, lowercased) before matching.
+When `sourceenv` is configured with `Prefix: "APP_"`, `conf:"env:DATABASE__HOST"` matches `APP_DATABASE__HOST`.
 Prefer `name:` for general cross-source key mapping; use `env:` when the intent is specifically env-key compatibility.
 
 ## 4. Normalize Typed Values Before Validation

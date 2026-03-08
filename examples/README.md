@@ -5,7 +5,7 @@ Use this page to quickly find the right example format.
 ## Runnable Examples
 
 - [basic](basic/) - End-to-end app config loading with file + env layering, validation, provenance, and redaction.
-- [transformer](transformer/) - Typed `WithTransformer(...)` canonicalization before tag validation.
+- [transformer](transformer/) - Typed transform-stage canonicalization before tag validation, shown with `WithTransformerFunc(...)`.
 
 Run it from the repository root:
 

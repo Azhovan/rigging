@@ -20,11 +20,12 @@ go run main.go
 # Switch to production environment
 export APP_ENVIRONMENT=production
 export APP_DATABASE__HOST=prod-db.example.com
+export APP_DATABASE__SSL_MODE=require
 go run main.go
 
 # Enable feature flags
 export APP_FEATURES__ENABLE_METRICS=true
-export APP_FEATURES__RATELIMIT=5000
+export APP_FEATURES__RATE_LIMIT=5000
 go run main.go
 ```
 

@@ -351,7 +351,7 @@ Configure binding and validation with the `conf` tag:
 | Tag | Description | Example |
 |-----|-------------|---------|
 | `required` | Field must have a value | `conf:"required"` |
-| `env:VAR` | Bind from an explicit env-style key path (normalized with `__` -> `.` and lowercased) | `conf:"env:APP__DATABASE__HOST"` |
+| `env:VAR` | Bind from an explicit env-style key path (normalized with `__` -> `.` and lowercased) after any `sourceenv.Options.Prefix` stripping | `conf:"env:DATABASE__HOST"` |
 | `default:X` | Default value if not provided | `conf:"default:8080"` |
 | `min:N` | Minimum value (numeric) or length (string) | `conf:"min:1024"` |
 | `max:N` | Maximum value (numeric) or length (string) | `conf:"max:65535"` |
@@ -373,7 +373,7 @@ type Config struct {
 **Tag precedence:**
 
 - `name:` overrides all key derivation (ignores `prefix:` and field name)
-- `env:` is used when `name:` is not set
+- `env:` is used when `name:` is not set; it matches the env-style key after any source prefix stripping
 - otherwise keys are derived from field names (snake_case), with parent `prefix:` for nested structs
 - env-style normalization converts `__` to `.` and preserves single `_`
 

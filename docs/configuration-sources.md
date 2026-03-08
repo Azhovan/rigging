@@ -150,11 +150,13 @@ Important:
 - File source flattens nested objects but does not rewrite separators.
 - File source can optionally adapt flattened keys via `SnakeCaseKeys` and `KeyPrefix` in `sourcefile.Options`.
 - Rigging lowercases keys during loader merge for consistent matching across sources.
-- If your file keys are snake_case, use `name:` tags to match them.
+- Derived field keys are already snake_case, so `MaxConnections` matches `max_connections` without tags.
+- Use `name:` only when the source key path differs from the derived path, or use `SnakeCaseKeys` / `KeyPrefix` to adapt file keys at the source boundary.
 
 ```go
 type Config struct {
-    MaxConnections int `conf:"name:max_connections"`
+    MaxConnections int           // matches max_connections
+    LegacyPort     int `conf:"name:service.port"`
 }
 ```
 

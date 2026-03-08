@@ -15,8 +15,7 @@ cd rigging
 make ci
 
 # Or run individual checks
-make test
-make test-race
+make test   # race-enabled test suite
 make fmt
 ```
 
@@ -41,7 +40,7 @@ make fmt
 
 ### Testing Requirements
 - All exported functions must have tests
-- Aim for >80% coverage
+- Keep coverage healthy; the current `make ci` gate fails below 70% total coverage
 - Use table-driven tests
 - Test error paths, not just happy paths
 
@@ -124,8 +123,8 @@ We reject:
 
 **Using Make (recommended):**
 ```bash
-make ci       # Run all CI checks (fmt, vet, test, lint)
-make test     # Run tests
+make ci       # Run all CI checks (fmt, vet, test, lint, coverage gate)
+make test     # Run race-enabled tests
 make fmt      # Format code
 make vet      # Run go vet
 make lint     # Run golangci-lint
