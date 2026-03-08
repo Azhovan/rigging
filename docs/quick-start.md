@@ -116,15 +116,18 @@ File source behavior:
 - keys are flattened from file structure and lowercased
 - separators are not rewritten (for example, `max_connections` stays `max_connections`)
 
-If your file keys are snake_case, map explicitly:
+Derived field keys are already snake_case, so `MaxConnections` matches `max_connections` without extra tags.
+Use `name:` only when the source key path differs, or adapt file keys at the source boundary with `sourcefile.Options{SnakeCaseKeys: true}` / `KeyPrefix`.
 
 ```go
 type Config struct {
-    MaxConnections int `conf:"name:max_connections"`
+    MaxConnections int // matches max_connections
+    LegacyPort     int `conf:"name:service.port"`
 }
 ```
 
-If you need to bind a field to a specific environment-style key path, use `env:` (for example, `conf:"env:APP__DATABASE__HOST"`).
+If you need to bind a field to a specific environment-style key path, use `env:`.
+The tag matches the normalized key after any `sourceenv.Options.Prefix` stripping, so with `Prefix: "APP_"`, `APP_DATABASE__HOST` maps via `conf:"env:DATABASE__HOST"`.
 
 ## 7. Fail-Fast Validation
 
