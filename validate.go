@@ -20,6 +20,19 @@ func validateFieldWithPresence(fieldValue reflect.Value, fieldPath string, tags 
 	var errors []FieldError
 	fieldPresent := presentFields != nil && presentFields[fieldPath]
 
+	// Surface tag parse errors (malformed directives, unknown directives, etc.)
+	for _, msg := range tags.parseErrors {
+		errors = append(errors, FieldError{
+			FieldPath: fieldPath,
+			Code:      ErrCodeInvalidTag,
+			Message:   msg,
+		})
+	}
+
+	// Validate min/max tag parseability upfront so malformed constraints
+	// are reported even when value validation is skipped (e.g., zero/missing values).
+	errors = append(errors, validateMinMaxParseable(fieldValue, fieldPath, tags)...)
+
 	// Check required constraint
 	if tags.required {
 		if presentFields != nil {
@@ -185,6 +198,70 @@ func isZeroValue(v reflect.Value) bool {
 	default:
 		return v.IsZero()
 	}
+}
+
+// validateMinMaxParseable checks that min/max tag values can be parsed for the given field kind.
+// Called before early returns so malformed constraints are always reported.
+func validateMinMaxParseable(fieldValue reflect.Value, fieldPath string, tags tagConfig) []FieldError {
+	var errors []FieldError
+
+	kind := fieldValue.Kind()
+	switch kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if tags.min != "" {
+			if _, err := strconv.ParseInt(tags.min, 10, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid min constraint %q: must be a valid integer", tags.min)})
+			}
+		}
+		if tags.max != "" {
+			if _, err := strconv.ParseInt(tags.max, 10, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid max constraint %q: must be a valid integer", tags.max)})
+			}
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if tags.min != "" {
+			if _, err := strconv.ParseUint(tags.min, 10, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid min constraint %q: must be a valid unsigned integer", tags.min)})
+			}
+		}
+		if tags.max != "" {
+			if _, err := strconv.ParseUint(tags.max, 10, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid max constraint %q: must be a valid unsigned integer", tags.max)})
+			}
+		}
+	case reflect.Float32, reflect.Float64:
+		if tags.min != "" {
+			if _, err := strconv.ParseFloat(tags.min, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid min constraint %q: must be a valid number", tags.min)})
+			}
+		}
+		if tags.max != "" {
+			if _, err := strconv.ParseFloat(tags.max, 64); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid max constraint %q: must be a valid number", tags.max)})
+			}
+		}
+	case reflect.String:
+		if tags.min != "" {
+			if _, err := strconv.Atoi(tags.min); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid min constraint %q: must be a valid integer", tags.min)})
+			}
+		}
+		if tags.max != "" {
+			if _, err := strconv.Atoi(tags.max); err != nil {
+				errors = append(errors, FieldError{FieldPath: fieldPath, Code: ErrCodeInvalidTag,
+					Message: fmt.Sprintf("invalid max constraint %q: must be a valid integer", tags.max)})
+			}
+		}
+	}
+
+	return errors
 }
 
 // validateIntMinMax validates min/max constraints for signed integer types.

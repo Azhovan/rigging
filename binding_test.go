@@ -116,8 +116,9 @@ func TestBinding_ParseTag(t *testing.T) {
 			name: "default with comma terminates directive",
 			tag:  "default:a,b,c",
 			expected: tagConfig{
-				defValue:   "a",
-				hasDefault: true,
+				defValue:    "a",
+				hasDefault:  true,
+				parseErrors: []string{`unknown directive "b"`, `unknown directive "c"`},
 			},
 		},
 		{
@@ -364,14 +365,16 @@ func TestBinding_ParseTag(t *testing.T) {
 			name: "required with invalid value defaults to true",
 			tag:  "required:invalid",
 			expected: tagConfig{
-				required: true,
+				required:    true,
+				parseErrors: []string{`invalid required value "invalid": use true or false`},
 			},
 		},
 		{
 			name: "required with numeric value defaults to true",
 			tag:  "required:1",
 			expected: tagConfig{
-				required: true,
+				required:    true,
+				parseErrors: []string{`invalid required value "1": use true or false`},
 			},
 		},
 		{
@@ -399,14 +402,16 @@ func TestBinding_ParseTag(t *testing.T) {
 			name: "secret with invalid value defaults to true",
 			tag:  "secret:invalid",
 			expected: tagConfig{
-				secret: true,
+				secret:      true,
+				parseErrors: []string{`invalid secret value "invalid": use true or false`},
 			},
 		},
 		{
 			name: "secret with yes defaults to true",
 			tag:  "secret:yes",
 			expected: tagConfig{
-				secret: true,
+				secret:      true,
+				parseErrors: []string{`invalid secret value "yes": use true or false`},
 			},
 		},
 		{
@@ -574,29 +579,35 @@ func TestBinding_ParseTag(t *testing.T) {
 
 		// Unknown directives
 		{
-			name: "unknown directive ignored",
+			name: "unknown directive reported",
 			tag:  "unknown:value,env:VAR",
 			expected: tagConfig{
-				env: "VAR",
+				env:         "VAR",
+				parseErrors: []string{`unknown directive "unknown"`},
 			},
 		},
 		{
 			name: "multiple unknown directives",
 			tag:  "foo:bar,env:VAR,baz:qux,required",
 			expected: tagConfig{
-				env:      "VAR",
-				required: true,
+				env:         "VAR",
+				required:    true,
+				parseErrors: []string{`unknown directive "foo"`, `unknown directive "baz"`},
 			},
 		},
 		{
-			name:     "only unknown directives",
-			tag:      "unknown:value,another:thing",
-			expected: tagConfig{},
+			name: "only unknown directives",
+			tag:  "unknown:value,another:thing",
+			expected: tagConfig{
+				parseErrors: []string{`unknown directive "unknown"`, `unknown directive "another"`},
+			},
 		},
 		{
-			name:     "typo in directive name",
-			tag:      "envv:VAR,requiired:true", // intentional typos to test silent ignore
-			expected: tagConfig{},
+			name: "typo in directive name",
+			tag:  "envv:VAR,requiired:true",
+			expected: tagConfig{
+				parseErrors: []string{`unknown directive "envv"`, `unknown directive "requiired"`},
+			},
 		},
 
 		// Edge cases
@@ -654,6 +665,9 @@ func TestBinding_ParseTag(t *testing.T) {
 			}
 			if result.secret != tt.expected.secret {
 				t.Errorf("secret: got %v, want %v", result.secret, tt.expected.secret)
+			}
+			if !reflect.DeepEqual(result.parseErrors, tt.expected.parseErrors) {
+				t.Errorf("parseErrors: got %v, want %v", result.parseErrors, tt.expected.parseErrors)
 			}
 		})
 	}

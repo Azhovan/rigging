@@ -491,3 +491,109 @@ func TestIsZeroValue(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateField_InvalidMinMax(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		tags  tagConfig
+	}{
+		{
+			name:  "int with non-numeric min",
+			value: 5,
+			tags:  tagConfig{min: "abc"},
+		},
+		{
+			name:  "int with non-numeric max",
+			value: 5,
+			tags:  tagConfig{max: "xyz"},
+		},
+		{
+			name:  "uint with non-numeric min",
+			value: uint(5),
+			tags:  tagConfig{min: "abc"},
+		},
+		{
+			name:  "uint with negative min",
+			value: uint(5),
+			tags:  tagConfig{min: "-1"},
+		},
+		{
+			name:  "float with non-numeric min",
+			value: 5.0,
+			tags:  tagConfig{min: "abc"},
+		},
+		{
+			name:  "float with non-numeric max",
+			value: 5.0,
+			tags:  tagConfig{max: "abc"},
+		},
+		{
+			name:  "string with non-numeric min length",
+			value: "hello",
+			tags:  tagConfig{min: "abc"},
+		},
+		{
+			name:  "string with non-numeric max length",
+			value: "hello",
+			tags:  tagConfig{max: "abc"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fieldValue := reflect.ValueOf(tt.value)
+			errors := validateField(fieldValue, "TestField", tt.tags)
+
+			if len(errors) == 0 {
+				t.Fatal("expected invalid_tag error, got none")
+			}
+			if errors[0].Code != ErrCodeInvalidTag {
+				t.Errorf("expected error code %q, got %q", ErrCodeInvalidTag, errors[0].Code)
+			}
+		})
+	}
+}
+
+func TestValidateField_ParseErrors(t *testing.T) {
+	tags := tagConfig{
+		parseErrors: []string{`unknown directive "foo"`},
+	}
+	fieldValue := reflect.ValueOf("hello")
+	errors := validateField(fieldValue, "TestField", tags)
+
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errors), errors)
+	}
+	if errors[0].Code != ErrCodeInvalidTag {
+		t.Errorf("expected error code %q, got %q", ErrCodeInvalidTag, errors[0].Code)
+	}
+	if errors[0].Message != `unknown directive "foo"` {
+		t.Errorf("unexpected message: %s", errors[0].Message)
+	}
+}
+
+func TestValidateField_InvalidMinMax_EarlyReturnPath(t *testing.T) {
+	// Malformed min/max must be reported even when value validation is skipped
+	// (e.g., required field with zero value triggers early return).
+	tags := tagConfig{required: true, min: "abc"}
+	fieldValue := reflect.ValueOf(0)
+	errors := validateFieldWithPresence(fieldValue, "TestField", tags, nil)
+
+	hasRequired := false
+	hasInvalidTag := false
+	for _, e := range errors {
+		if e.Code == ErrCodeRequired {
+			hasRequired = true
+		}
+		if e.Code == ErrCodeInvalidTag {
+			hasInvalidTag = true
+		}
+	}
+	if !hasRequired {
+		t.Error("expected required error")
+	}
+	if !hasInvalidTag {
+		t.Error("expected invalid_tag error for malformed min, even on early return")
+	}
+}
