@@ -694,6 +694,33 @@ func TestBinding_ParseTag_CacheIsolationForOneofSlice(t *testing.T) {
 	}
 }
 
+func TestBinding_ParseTag_CacheIsolationForParseErrors(t *testing.T) {
+	tag := "required:maybe,unknown"
+
+	first := parseTag(tag)
+	if !reflect.DeepEqual(first.parseErrors, []string{
+		`invalid required value "maybe": use true or false`,
+		`unknown directive "unknown"`,
+	}) {
+		t.Fatalf("unexpected initial parseErrors: %v", first.parseErrors)
+	}
+
+	// Mutate the caller-owned result; this must not affect cached values.
+	first.parseErrors[0] = "mutated"
+	first.parseErrors = append(first.parseErrors, "extra")
+
+	second := parseTag(tag)
+	if !reflect.DeepEqual(second.parseErrors, []string{
+		`invalid required value "maybe": use true or false`,
+		`unknown directive "unknown"`,
+	}) {
+		t.Fatalf("cache was mutated through returned parseErrors slice: got %v", second.parseErrors)
+	}
+	if !second.required {
+		t.Fatalf("expected required=true on cached parse result")
+	}
+}
+
 func TestBinding_ConvertValue(t *testing.T) {
 	tests := []struct {
 		name        string
