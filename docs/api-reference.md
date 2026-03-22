@@ -140,10 +140,11 @@ type Validator[T any] interface {
 
 Rigging uses a fixed load pipeline during `Loader.Load` and `Loader.Watch` reloads:
 
-`merge sources -> strict unknown-key check -> bind/type conversion/defaults -> typed transforms -> tag validation -> custom validators`
+`schema tag validation -> merge sources -> strict unknown-key check -> bind/type conversion/defaults -> typed transforms -> tag validation -> custom validators`
 
 Behavior notes:
 
+- Malformed `conf` tags are detected before source loading begins.
 - Sources are merged in registration order; later sources override earlier ones.
 - `Strict(true)` is the default, and unknown-key checks run before binding.
 - Binding applies defaults and type conversion before transformers run.
@@ -341,6 +342,7 @@ type FieldError struct {
 - `min` - Value below minimum
 - `max` - Value exceeds maximum
 - `oneof` - Value not in allowed set
+- `invalid_tag` - `conf` tag contains an unrecognized or malformed directive
 - `invalid_type` - Type conversion failed
 - `unknown_key` - Configuration key doesn't map to any field (strict mode)
 
@@ -359,6 +361,9 @@ Configure binding and validation with the `conf` tag:
 | `secret` | Mark field for redaction | `conf:"secret"` |
 | `prefix:path` | Prefix for nested struct fields | `conf:"prefix:database"` |
 | `name:path` | Override derived key path | `conf:"name:custom.path"` |
+
+Malformed `conf` tags fail fast during schema validation before any sources are loaded.
+`oneof:` still uses the existing comma-delimited grammar, so this release does not change how `oneof` values are written or add escaping for ambiguous typos after `oneof:`.
 
 **Combining tags:**
 

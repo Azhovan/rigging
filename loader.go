@@ -86,7 +86,15 @@ func (l *Loader[T]) LoadWithProvenance(ctx context.Context) (*T, *Provenance, er
 }
 
 func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenance, error) {
-	// Step 1: Load from all sources and merge
+	rootType := configType[T]()
+
+	// Step 1: Validate the schema before any source I/O.
+	schemaErrors := getSchemaValidationErrors(rootType)
+	if len(schemaErrors) > 0 {
+		return nil, nil, &ValidationError{FieldErrors: schemaErrors}
+	}
+
+	// Step 2: Load from all sources and merge
 	mergedData := make(map[string]mergedEntry)
 
 	for _, source := range l.sources {
@@ -133,12 +141,10 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		}
 	}
 
-	// Step 2: In strict mode, detect unknown keys
+	// Step 3: In strict mode, detect unknown keys
 	if l.strict {
-		// Get all valid field keys from the struct
-		var cfg T
-		validKeys := collectValidKeys(reflect.TypeOf(cfg), "")
-		dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(reflect.TypeOf(cfg), "")
+		validKeys := collectValidKeys(rootType, "")
+		dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(rootType, "")
 
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
@@ -157,18 +163,18 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		}
 	}
 
-	// Step 3: Create zero instance of T
+	// Step 4: Create zero instance of T
 	cfg := new(T)
 	cfgValue := reflect.ValueOf(cfg).Elem()
 
-	// Step 4: Bind struct fields from merged data
+	// Step 5: Bind struct fields from merged data
 	var provenanceFields []FieldProvenance
 	presentFields := make(map[string]bool)
 	bindErrors := bindStructWithPresence(cfgValue, mergedData, &provenanceFields, presentFields, "", "")
 
 	allErrors := append([]FieldError{}, bindErrors...)
 
-	// Step 5: Run typed transforms after successful binding so transformers operate on converted values.
+	// Step 6: Run typed transforms after successful binding so transformers operate on converted values.
 	if len(bindErrors) == 0 {
 		for i, transformer := range l.transformers {
 			err := transformer.Transform(ctx, cfg)
@@ -182,12 +188,12 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		}
 	}
 
-	// Step 6: Validate struct (tag-based validation)
+	// Step 7: Validate struct (tag-based validation)
 	// Required checks use presence data captured before conversion.
 	validationErrors := validateStructWithPresence(cfgValue, presentFields)
 	allErrors = append(allErrors, validationErrors...)
 
-	// Step 7: Run custom validators
+	// Step 8: Run custom validators
 	for i, validator := range l.validators {
 		err := validator.Validate(ctx, cfg)
 		if err != nil {
@@ -201,18 +207,18 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 		}
 	}
 
-	// Step 8: Return error if any validation failed
+	// Step 9: Return error if any validation failed
 	if len(allErrors) > 0 {
 		return nil, nil, &ValidationError{FieldErrors: allErrors}
 	}
 
-	// Step 9: Build provenance for the config instance
+	// Step 10: Build provenance for the config instance
 	prov := &Provenance{Fields: provenanceFields}
 	if store {
 		storeProvenance(cfg, prov)
 	}
 
-	// Step 10: Return the loaded configuration
+	// Step 11: Return the loaded configuration
 	return cfg, prov, nil
 }
 
