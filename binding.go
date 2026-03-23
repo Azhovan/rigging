@@ -14,27 +14,33 @@ import (
 
 // tagConfig holds parsed directives from a struct field's `conf` tag.
 type tagConfig struct {
-	env        string   // Environment variable name (env:VAR_NAME)
-	name       string   // Custom key path (name:custom.path)
-	prefix     string   // Prefix for nested structs (prefix:foo)
-	defValue   string   // Default value (default:value)
-	min        string   // Minimum constraint (min:N)
-	max        string   // Maximum constraint (max:M)
-	oneof      []string // Allowed values (oneof:a,b,c)
-	required   bool     // Field is required (required or required:true)
-	secret     bool     // Field is secret (secret or secret:true)
-	hasDefault bool     // Whether a default directive was present
+	env         string   // Environment variable name (env:VAR_NAME)
+	name        string   // Custom key path (name:custom.path)
+	prefix      string   // Prefix for nested structs (prefix:foo)
+	defValue    string   // Default value (default:value)
+	min         string   // Minimum constraint (min:N)
+	max         string   // Maximum constraint (max:M)
+	oneof       []string // Allowed values (oneof:a,b,c)
+	required    bool     // Field is required (required or required:true)
+	secret      bool     // Field is secret (secret or secret:true)
+	hasDefault  bool     // Whether a default directive was present
+	parseErrors []string // Errors from malformed tag directives
 }
 
 var tagConfigCache sync.Map
 var optionalTypePkgPath = reflect.TypeOf(Optional[int]{}).PkgPath()
 
 func cloneTagConfig(cfg tagConfig) tagConfig {
-	if len(cfg.oneof) == 0 {
+	if len(cfg.oneof) == 0 && len(cfg.parseErrors) == 0 {
 		return cfg
 	}
 
-	cfg.oneof = append([]string(nil), cfg.oneof...)
+	if len(cfg.oneof) > 0 {
+		cfg.oneof = append([]string(nil), cfg.oneof...)
+	}
+	if len(cfg.parseErrors) > 0 {
+		cfg.parseErrors = append([]string(nil), cfg.parseErrors...)
+	}
 	return cfg
 }
 
@@ -111,8 +117,9 @@ func parseTag(tag string) tagConfig {
 			} else if value == "false" {
 				cfg.required = false
 			} else {
-				// Invalid value, default to true for safety
 				cfg.required = true
+				cfg.parseErrors = append(cfg.parseErrors,
+					fmt.Sprintf("invalid required value %q: use true or false", value))
 			}
 		case "secret":
 			// No value or explicit "true" means true
@@ -121,9 +128,13 @@ func parseTag(tag string) tagConfig {
 			} else if value == "false" {
 				cfg.secret = false
 			} else {
-				// Invalid value, default to true for safety
 				cfg.secret = true
+				cfg.parseErrors = append(cfg.parseErrors,
+					fmt.Sprintf("invalid secret value %q: use true or false", value))
 			}
+		default:
+			cfg.parseErrors = append(cfg.parseErrors,
+				fmt.Sprintf("unknown directive %q", name))
 		}
 	}
 

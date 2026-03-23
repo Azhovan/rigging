@@ -13,6 +13,7 @@ const (
 	ErrCodeOneOf       = "oneof"        // Value is not in the allowed set
 	ErrCodeInvalidType = "invalid_type" // Type conversion failed
 	ErrCodeUnknownKey  = "unknown_key"  // Configuration key doesn't map to any field (strict mode)
+	ErrCodeInvalidTag  = "invalid_tag"  // Struct tag directive is malformed or unrecognized
 )
 
 // ValidationError aggregates field-level validation failures.
