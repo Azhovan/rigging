@@ -696,7 +696,7 @@ func tryBindNestedField(
 		if rawMap, ok := entry.value.(map[string]any); ok {
 			nestedData := make(map[string]mergedEntry)
 			for k, v := range rawMap {
-				nestedData[k] = mergedEntry{value: v, sourceName: entry.sourceName}
+				nestedData[strings.ToLower(k)] = mergedEntry{value: v, sourceName: entry.sourceName}
 			}
 			return true, bindNested(fieldValue, nestedData, "", fieldPath)
 		}

@@ -914,6 +914,33 @@ func TestLoad_NestedStruct(t *testing.T) {
 	if cfg.Database.Port != 5432 {
 		t.Errorf("expected Database.Port=5432, got %d", cfg.Database.Port)
 	}
+
+	t.Run("direct nested map normalizes inner keys like strict validation", func(t *testing.T) {
+		type ConfigWithDirectMap struct {
+			Database Database
+		}
+
+		source := &mockSource{
+			data: map[string]any{
+				"database": map[string]any{
+					"Host": "localhost",
+					"Port": 5432,
+				},
+			},
+		}
+
+		cfg, err := NewLoader[ConfigWithDirectMap]().WithSource(source).Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Database.Host != "localhost" {
+			t.Errorf("expected Database.Host=localhost, got %s", cfg.Database.Host)
+		}
+		if cfg.Database.Port != 5432 {
+			t.Errorf("expected Database.Port=5432, got %d", cfg.Database.Port)
+		}
+	})
 }
 
 func TestLoad_NestedCollections(t *testing.T) {

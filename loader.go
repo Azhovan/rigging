@@ -143,14 +143,13 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 
 	// Step 3: In strict mode, detect unknown keys
 	if l.strict {
-		validKeys := collectValidKeys(rootType, "")
-		validKeyTypes := collectValidKeyTypes(rootType, "")
-		dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(rootType, "")
+		strictMetadataCache := make(map[strictValidationMetadataKey]strictValidationMetadata)
+		strictMetadata := getStrictValidationMetadata(rootType, "", strictMetadataCache)
 
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
 		for key, entry := range mergedData {
-			if !validKeys[key] && !matchesDynamicMapKeyPattern(key, dynamicMapKeyPatterns) {
+			if !strictMetadata.validKeys[key] && !matchesDynamicMapKeyPattern(key, strictMetadata.dynamicMapKeyPatterns) {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
@@ -159,8 +158,8 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 				continue
 			}
 
-			if fieldType, ok := validKeyTypes[key]; ok {
-				unknownKeyErrors = append(unknownKeyErrors, collectStructuredUnknownKeyErrors(entry.value, fieldType, key)...)
+			if fieldType, ok := strictMetadata.validKeyTypes[key]; ok {
+				unknownKeyErrors = append(unknownKeyErrors, collectStructuredUnknownKeyErrors(entry.value, fieldType, key, strictMetadataCache)...)
 			}
 		}
 
@@ -355,6 +354,43 @@ func collectValidKeyTypes(t reflect.Type, prefix string) map[string]reflect.Type
 	return validKeyTypes
 }
 
+type strictValidationMetadata struct {
+	validKeys             map[string]bool
+	validKeyTypes         map[string]reflect.Type
+	dynamicMapKeyPatterns []string
+}
+
+type strictValidationMetadataKey struct {
+	targetType reflect.Type
+	prefix     string
+}
+
+func getStrictValidationMetadata(
+	targetType reflect.Type,
+	prefix string,
+	cache map[strictValidationMetadataKey]strictValidationMetadata,
+) strictValidationMetadata {
+	for targetType.Kind() == reflect.Ptr {
+		targetType = targetType.Elem()
+	}
+
+	cacheKey := strictValidationMetadataKey{
+		targetType: targetType,
+		prefix:     prefix,
+	}
+	if metadata, ok := cache[cacheKey]; ok {
+		return metadata
+	}
+
+	metadata := strictValidationMetadata{
+		validKeys:             collectValidKeys(targetType, prefix),
+		validKeyTypes:         collectValidKeyTypes(targetType, prefix),
+		dynamicMapKeyPatterns: collectDynamicMapKeyPatterns(targetType, prefix),
+	}
+	cache[cacheKey] = metadata
+	return metadata
+}
+
 func collectDynamicMapKeyPatterns(t reflect.Type, prefix string) []string {
 	patternSet := make(map[string]struct{})
 
@@ -414,7 +450,12 @@ func collectDynamicMapKeyPatterns(t reflect.Type, prefix string) []string {
 	return patterns
 }
 
-func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, keyPath string) []FieldError {
+func collectStructuredUnknownKeyErrors(
+	rawValue any,
+	targetType reflect.Type,
+	keyPath string,
+	metadataCache map[strictValidationMetadataKey]strictValidationMetadata,
+) []FieldError {
 	if rawValue == nil {
 		return nil
 	}
@@ -432,7 +473,7 @@ func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, ke
 			return nil
 		}
 
-		return collectUnknownStructMapKeys(rawMap, targetType, keyPath)
+		return collectUnknownStructMapKeys(rawMap, targetType, keyPath, metadataCache)
 
 	case reflect.Slice, reflect.Array:
 		elemType := unwrapStrictType(targetType.Elem())
@@ -452,7 +493,7 @@ func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, ke
 				continue
 			}
 
-			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, fmt.Sprintf("%s.%d", keyPath, i))...)
+			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, fmt.Sprintf("%s.%d", keyPath, i), metadataCache)...)
 		}
 		return fieldErrors
 
@@ -482,7 +523,7 @@ func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, ke
 				continue
 			}
 
-			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, keyPath+"."+rawKey.String())...)
+			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, keyPath+"."+strings.ToLower(rawKey.String()), metadataCache)...)
 		}
 		return fieldErrors
 	}
@@ -490,15 +531,18 @@ func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, ke
 	return nil
 }
 
-func collectUnknownStructMapKeys(rawMap map[string]any, targetType reflect.Type, keyPath string) []FieldError {
-	validKeys := collectValidKeys(targetType, "")
-	validKeyTypes := collectValidKeyTypes(targetType, "")
-	dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(targetType, "")
+func collectUnknownStructMapKeys(
+	rawMap map[string]any,
+	targetType reflect.Type,
+	keyPath string,
+	metadataCache map[strictValidationMetadataKey]strictValidationMetadata,
+) []FieldError {
+	strictMetadata := getStrictValidationMetadata(targetType, "", metadataCache)
 
 	var fieldErrors []FieldError
 	for rawKey, rawValue := range rawMap {
 		normalizedKey := strings.ToLower(rawKey)
-		if !validKeys[normalizedKey] && !matchesDynamicMapKeyPattern(normalizedKey, dynamicMapKeyPatterns) {
+		if !strictMetadata.validKeys[normalizedKey] && !matchesDynamicMapKeyPattern(normalizedKey, strictMetadata.dynamicMapKeyPatterns) {
 			fieldErrors = append(fieldErrors, FieldError{
 				FieldPath: keyPath + "." + normalizedKey,
 				Code:      ErrCodeUnknownKey,
@@ -507,8 +551,8 @@ func collectUnknownStructMapKeys(rawMap map[string]any, targetType reflect.Type,
 			continue
 		}
 
-		if nestedType, ok := validKeyTypes[normalizedKey]; ok {
-			fieldErrors = append(fieldErrors, collectStructuredUnknownKeyErrors(rawValue, nestedType, keyPath+"."+normalizedKey)...)
+		if nestedType, ok := strictMetadata.validKeyTypes[normalizedKey]; ok {
+			fieldErrors = append(fieldErrors, collectStructuredUnknownKeyErrors(rawValue, nestedType, keyPath+"."+normalizedKey, metadataCache)...)
 		}
 	}
 
