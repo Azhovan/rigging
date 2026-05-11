@@ -1025,6 +1025,80 @@ func TestLoad_NestedCollections(t *testing.T) {
 		}
 	})
 
+	t.Run("strict mode rejects unknown nested key in direct map value", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map": map[string]any{
+					"primary": map[string]any{
+						"host":    "ch1",
+						"port":    9000,
+						"unknown": "bad",
+					},
+				},
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested map value key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_map.primary.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
+	t.Run("strict mode rejects unknown nested key in slice element", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_list": []any{
+					map[string]any{
+						"host":    "ch1",
+						"port":    9000,
+						"unknown": "bad",
+					},
+				},
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested slice element key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_list.0.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_list.0.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
 	t.Run("strict mode disabled ignores unknown nested key in flattened map value", func(t *testing.T) {
 		source := &mockSource{
 			data: map[string]any{

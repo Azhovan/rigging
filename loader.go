@@ -144,17 +144,23 @@ func (l *Loader[T]) loadInternal(ctx context.Context, store bool) (*T, *Provenan
 	// Step 3: In strict mode, detect unknown keys
 	if l.strict {
 		validKeys := collectValidKeys(rootType, "")
+		validKeyTypes := collectValidKeyTypes(rootType, "")
 		dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(rootType, "")
 
 		// Check for unknown keys
 		var unknownKeyErrors []FieldError
-		for key := range mergedData {
+		for key, entry := range mergedData {
 			if !validKeys[key] && !matchesDynamicMapKeyPattern(key, dynamicMapKeyPatterns) {
 				unknownKeyErrors = append(unknownKeyErrors, FieldError{
 					FieldPath: key,
 					Code:      ErrCodeUnknownKey,
 					Message:   "unknown configuration key (strict mode)",
 				})
+				continue
+			}
+
+			if fieldType, ok := validKeyTypes[key]; ok {
+				unknownKeyErrors = append(unknownKeyErrors, collectStructuredUnknownKeyErrors(entry.value, fieldType, key)...)
 			}
 		}
 
@@ -305,6 +311,50 @@ func collectValidKeys(t reflect.Type, prefix string) map[string]bool {
 	return validKeys
 }
 
+func collectValidKeyTypes(t reflect.Type, prefix string) map[string]reflect.Type {
+	validKeyTypes := make(map[string]reflect.Type)
+
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return validKeyTypes
+	}
+
+	for _, meta := range getStructFieldMeta(t) {
+		field := meta.field
+		tagCfg := meta.tagCfg
+		keyPath := determineKeyPath(field.Name, tagCfg, prefix)
+		fieldType := field.Type
+
+		validKeyTypes[keyPath] = fieldType
+
+		if isOptionalType(fieldType) {
+			innerType := fieldType.Field(0).Type
+			if innerType.Kind() == reflect.Struct {
+				for nestedKey, nestedType := range collectValidKeyTypes(innerType, keyPath) {
+					validKeyTypes[nestedKey] = nestedType
+				}
+			}
+			continue
+		}
+
+		if fieldType.Kind() != reflect.Struct || fieldType.PkgPath() == "time" {
+			continue
+		}
+
+		nestedPrefix := keyPath
+		if tagCfg.prefix != "" {
+			nestedPrefix = tagCfg.prefix
+		}
+		for nestedKey, nestedType := range collectValidKeyTypes(fieldType, nestedPrefix) {
+			validKeyTypes[nestedKey] = nestedType
+		}
+	}
+
+	return validKeyTypes
+}
+
 func collectDynamicMapKeyPatterns(t reflect.Type, prefix string) []string {
 	patternSet := make(map[string]struct{})
 
@@ -362,6 +412,139 @@ func collectDynamicMapKeyPatterns(t reflect.Type, prefix string) []string {
 	}
 
 	return patterns
+}
+
+func collectStructuredUnknownKeyErrors(rawValue any, targetType reflect.Type, keyPath string) []FieldError {
+	if rawValue == nil {
+		return nil
+	}
+
+	targetType = unwrapStrictType(targetType)
+
+	switch targetType.Kind() {
+	case reflect.Struct:
+		if targetType == timeType || targetType == durationType {
+			return nil
+		}
+
+		rawMap, ok := rawStringMap(rawValue)
+		if !ok {
+			return nil
+		}
+
+		return collectUnknownStructMapKeys(rawMap, targetType, keyPath)
+
+	case reflect.Slice, reflect.Array:
+		elemType := unwrapStrictType(targetType.Elem())
+		if elemType.Kind() != reflect.Struct || elemType == timeType || elemType == durationType {
+			return nil
+		}
+
+		rawRef := reflect.ValueOf(rawValue)
+		if rawRef.Kind() != reflect.Slice && rawRef.Kind() != reflect.Array {
+			return nil
+		}
+
+		var fieldErrors []FieldError
+		for i := 0; i < rawRef.Len(); i++ {
+			elemMap, ok := rawStringMap(rawRef.Index(i).Interface())
+			if !ok {
+				continue
+			}
+
+			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, fmt.Sprintf("%s.%d", keyPath, i))...)
+		}
+		return fieldErrors
+
+	case reflect.Map:
+		if targetType.Key().Kind() != reflect.String {
+			return nil
+		}
+
+		elemType := unwrapStrictType(targetType.Elem())
+		if elemType.Kind() != reflect.Struct || elemType == timeType || elemType == durationType {
+			return nil
+		}
+
+		rawMapRef := reflect.ValueOf(rawValue)
+		if rawMapRef.Kind() != reflect.Map {
+			return nil
+		}
+
+		var fieldErrors []FieldError
+		for _, rawKey := range rawMapRef.MapKeys() {
+			if rawKey.Kind() != reflect.String {
+				continue
+			}
+
+			elemMap, ok := rawStringMap(rawMapRef.MapIndex(rawKey).Interface())
+			if !ok {
+				continue
+			}
+
+			fieldErrors = append(fieldErrors, collectUnknownStructMapKeys(elemMap, elemType, keyPath+"."+rawKey.String())...)
+		}
+		return fieldErrors
+	}
+
+	return nil
+}
+
+func collectUnknownStructMapKeys(rawMap map[string]any, targetType reflect.Type, keyPath string) []FieldError {
+	validKeys := collectValidKeys(targetType, "")
+	validKeyTypes := collectValidKeyTypes(targetType, "")
+	dynamicMapKeyPatterns := collectDynamicMapKeyPatterns(targetType, "")
+
+	var fieldErrors []FieldError
+	for rawKey, rawValue := range rawMap {
+		normalizedKey := strings.ToLower(rawKey)
+		if !validKeys[normalizedKey] && !matchesDynamicMapKeyPattern(normalizedKey, dynamicMapKeyPatterns) {
+			fieldErrors = append(fieldErrors, FieldError{
+				FieldPath: keyPath + "." + normalizedKey,
+				Code:      ErrCodeUnknownKey,
+				Message:   "unknown configuration key (strict mode)",
+			})
+			continue
+		}
+
+		if nestedType, ok := validKeyTypes[normalizedKey]; ok {
+			fieldErrors = append(fieldErrors, collectStructuredUnknownKeyErrors(rawValue, nestedType, keyPath+"."+normalizedKey)...)
+		}
+	}
+
+	return fieldErrors
+}
+
+func unwrapStrictType(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if isOptionalType(t) {
+		return unwrapStrictType(t.Field(0).Type)
+	}
+	return t
+}
+
+func rawStringMap(rawValue any) (map[string]any, bool) {
+	rawMap, ok := rawValue.(map[string]any)
+	if ok {
+		return rawMap, true
+	}
+
+	rawRef := reflect.ValueOf(rawValue)
+	if !rawRef.IsValid() || rawRef.Kind() != reflect.Map {
+		return nil, false
+	}
+
+	result := make(map[string]any, rawRef.Len())
+	for _, rawKey := range rawRef.MapKeys() {
+		if rawKey.Kind() != reflect.String {
+			return nil, false
+		}
+		result[rawKey.String()] = rawRef.MapIndex(rawKey).Interface()
+	}
+
+	return result, true
 }
 
 func collectMapValueKeyPatterns(baseKey string, valueType reflect.Type) []string {
