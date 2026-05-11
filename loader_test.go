@@ -941,6 +941,44 @@ func TestLoad_NestedStruct(t *testing.T) {
 			t.Errorf("expected Database.Port=5432, got %d", cfg.Database.Port)
 		}
 	})
+
+	t.Run("direct nested map rejects case collisions", func(t *testing.T) {
+		type ConfigWithDirectMap struct {
+			Database Database
+		}
+
+		source := &mockSource{
+			data: map[string]any{
+				"database": map[string]any{
+					"Host": "localhost",
+					"host": "db.example.com",
+				},
+			},
+		}
+
+		cfg, err := NewLoader[ConfigWithDirectMap]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected error for colliding nested map keys")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when nested key collision fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundCollision := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeInvalidType && fieldErr.FieldPath == "Database.host" {
+				foundCollision = true
+			}
+		}
+		if !foundCollision {
+			t.Fatalf("expected invalid_type for Database.host collision, got %#v", valErr.FieldErrors)
+		}
+	})
 }
 
 func TestLoad_NestedCollections(t *testing.T) {

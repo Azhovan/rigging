@@ -696,7 +696,15 @@ func tryBindNestedField(
 		if rawMap, ok := entry.value.(map[string]any); ok {
 			nestedData := make(map[string]mergedEntry)
 			for k, v := range rawMap {
-				nestedData[strings.ToLower(k)] = mergedEntry{value: v, sourceName: entry.sourceName}
+				normalizedKey := strings.ToLower(k)
+				if _, exists := nestedData[normalizedKey]; exists {
+					return true, []FieldError{{
+						FieldPath: fieldPath + "." + normalizedKey,
+						Code:      ErrCodeInvalidType,
+						Message:   "duplicate configuration keys after normalization",
+					}}
+				}
+				nestedData[normalizedKey] = mergedEntry{value: v, sourceName: entry.sourceName}
 			}
 			return true, bindNested(fieldValue, nestedData, "", fieldPath)
 		}
