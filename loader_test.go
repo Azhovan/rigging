@@ -914,6 +914,71 @@ func TestLoad_NestedStruct(t *testing.T) {
 	if cfg.Database.Port != 5432 {
 		t.Errorf("expected Database.Port=5432, got %d", cfg.Database.Port)
 	}
+
+	t.Run("direct nested map normalizes inner keys like strict validation", func(t *testing.T) {
+		type ConfigWithDirectMap struct {
+			Database Database
+		}
+
+		source := &mockSource{
+			data: map[string]any{
+				"database": map[string]any{
+					"Host": "localhost",
+					"Port": 5432,
+				},
+			},
+		}
+
+		cfg, err := NewLoader[ConfigWithDirectMap]().WithSource(source).Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if cfg.Database.Host != "localhost" {
+			t.Errorf("expected Database.Host=localhost, got %s", cfg.Database.Host)
+		}
+		if cfg.Database.Port != 5432 {
+			t.Errorf("expected Database.Port=5432, got %d", cfg.Database.Port)
+		}
+	})
+
+	t.Run("direct nested map rejects case collisions", func(t *testing.T) {
+		type ConfigWithDirectMap struct {
+			Database Database
+		}
+
+		source := &mockSource{
+			data: map[string]any{
+				"database": map[string]any{
+					"Host": "localhost",
+					"host": "db.example.com",
+				},
+			},
+		}
+
+		cfg, err := NewLoader[ConfigWithDirectMap]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected error for colliding nested map keys")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when nested key collision fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundCollision := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeInvalidType && fieldErr.FieldPath == "Database.host" {
+				foundCollision = true
+			}
+		}
+		if !foundCollision {
+			t.Fatalf("expected invalid_type for Database.host collision, got %#v", valErr.FieldErrors)
+		}
+	})
 }
 
 func TestLoad_NestedCollections(t *testing.T) {
@@ -1022,6 +1087,80 @@ func TestLoad_NestedCollections(t *testing.T) {
 		}
 		if !foundUnknown {
 			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
+	t.Run("strict mode rejects unknown nested key in direct map value", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_map": map[string]any{
+					"primary": map[string]any{
+						"host":    "ch1",
+						"port":    9000,
+						"unknown": "bad",
+					},
+				},
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested map value key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_map.primary.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_map.primary.unknown, got %#v", valErr.FieldErrors)
+		}
+	})
+
+	t.Run("strict mode rejects unknown nested key in slice element", func(t *testing.T) {
+		source := &mockSource{
+			data: map[string]any{
+				"clickhouse_list": []any{
+					map[string]any{
+						"host":    "ch1",
+						"port":    9000,
+						"unknown": "bad",
+					},
+				},
+			},
+		}
+
+		cfg, err := NewLoader[Config]().WithSource(source).Load(context.Background())
+		if err == nil {
+			t.Fatal("expected strict-mode error for unknown nested slice element key")
+		}
+		if cfg != nil {
+			t.Fatal("expected nil cfg when strict-mode validation fails")
+		}
+
+		valErr, ok := err.(*ValidationError)
+		if !ok {
+			t.Fatalf("expected ValidationError, got %T", err)
+		}
+
+		foundUnknown := false
+		for _, fieldErr := range valErr.FieldErrors {
+			if fieldErr.Code == ErrCodeUnknownKey && fieldErr.FieldPath == "clickhouse_list.0.unknown" {
+				foundUnknown = true
+			}
+		}
+		if !foundUnknown {
+			t.Fatalf("expected unknown_key for clickhouse_list.0.unknown, got %#v", valErr.FieldErrors)
 		}
 	})
 
